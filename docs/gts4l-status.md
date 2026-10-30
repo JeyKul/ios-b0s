@@ -28,3 +28,9 @@ GPU at 342 MHz with patch 0360: S1 reads back 775 mV, gfx3d measured 341 MHz, fu
 
 Metal: `mtltest` 0 FAIL lines (device through Metal.framework, no shaders). `mtlbridgetest` result 0: compute bad 0/1000,
 render bad 0/64, import bad 0/4096; QuartzCore's library 3 kernels ok, 4 failed, 13 pipeline pairs ok, 8 failed.
+
+RAM: TAIMEN_BASE=0xb1000000 TAIMEN_MEM=0xbd400000 boots (max_mem 0xbd400000). S-Boot loads the ramdisk at 0xb0000000, so the shim moves the payload to 0xa1000000 first. The range includes Android's secure camera area (0xfd600000-0xffffffff); not yet shown to be touched under load.
+
+USB: S-Boot leaves the DWC3 powered and clocked with the USB3 PHY in reset. sweetusb=2, at SuperSpeed and with sweetusbss=0, times out on the first endpoint command. Patch 0362 adds gts4lusbutmi=1, the high-speed-only clock switch from Samsung's dwc3-msm.c.
+
+Gold: S-Boot leaves gold on its PLL at 1132.8 MHz (GFMUX cfg 0x300). Patch 0361 adds gts4lgold=1. The chip's open-loop fuses differ from the Pixel's, so `taimenosm` refuses and its tables must not be reused.
