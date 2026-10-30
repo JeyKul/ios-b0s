@@ -18,3 +18,8 @@ Measured:
 - Touch works, gts4lflip=0 with gts4lrot=3. Keys: power, volume up (PM8998 GPIO 6), volume down as Home.
 
 Not done: GPU (CPU renderer only), brightness, faster gold clocks, Wi-Fi, audio, sensors, battery, iPadOS.
+
+GPU, first boot (patch 0359 kernel): `a540_zap` accepted by TrustZone, CP works, Mesa drives CoreAnimation as FD540.
+S1 read back 0x0407 after a write of 775 mV (0x0307); the high byte matches PON's 0x04 from the unlocked key poll, so
+this looks like a crossed read, not a real 1031 mV. The clock set stopped there and gfx3d stayed where it was. Patch 0360
+locks the poll and adds `gts4lgpuclk=MHZ`.
