@@ -15,6 +15,10 @@ python3 -I "$P/tools/mkadt.py" "$out/gts4l.adt" --gts4l
 # Pixel 2 XL drivers that drive board-specific GPIOs, buses and PHYs: off until each has its Tab S4 values.
 off="taimentouch=0 sweettouch=0 taimenhaptic=0 taimensensors=0 sweetusb=0 taimenaudio=0 taimenmic=0 taimenwifi=0"
 cmdline="debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress taimenwdt=0 sweetkeys=0 sweetperf=0 sweetbattery=0 $off $*"
+# XNU takes the last occurrence: drop the earlier ones (cpus=1, sweetkeys=0, ...), as boot-xnu.sh does
+cmdline=$(printf '%s\n' "$cmdline" | awk '{ for (i = NF; i >= 1; i--) { k = $i; sub(/=.*/, "", k);
+	if (!(k in seen)) { seen[k] = 1; keep[++n] = $i } }
+	for (i = n; i >= 1; i--) printf "%s%s", keep[i], (i > 1 ? " " : "\n") }')
 [ ${#cmdline} -le 607 ] || { echo "boot-args are ${#cmdline} bytes, over the 607 mkpayload keeps" >&2; exit 1; }
 blobs=()
 [ -n "${ROOTFIX:-}" ] && blobs+=(--blob "ROOTFIX=$(realpath "$ROOTFIX")")
