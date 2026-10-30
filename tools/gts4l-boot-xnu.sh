@@ -28,4 +28,4 @@ if [ -n "${GPUFW:-}" ]; then
 		--blob "GPU-ZAP-MDT=$GPUFW/a540_zap.mdt" --blob "GPU-ZAP-SEG=$GPUFW/a540_zap.b02")
 fi
 python3 -I "$P/tools/mkpayload.py" "$kernel" "$out/gts4l.adt" "$out/payload" --l2block 0x200000 --cmdline "$cmdline" "${blobs[@]}"
-EXTRA_CFLAGS="-DSTAGE2 -DNOKICK" OUT=gts4l-xnu.img "$P/shim/build-gts4l.sh" "$tail" "$out/payload"
+EXTRA_CFLAGS="-DSTAGE2 -DNOKICK -DPAYLOAD_RELOC=0xa1000000UL" OUT=gts4l-xnu.img "$P/shim/build-gts4l.sh" "$tail" "$out/payload"

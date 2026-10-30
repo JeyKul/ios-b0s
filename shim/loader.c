@@ -101,6 +101,16 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 	con_hex("VIRT", p->virt_base);
 	con_hex("ENTRY", p->entry_va);
 
+#ifdef PAYLOAD_RELOC
+	/* S-Boot puts the ramdisk at 0xb0000000, inside a kernel range that starts at 0xb1000000: move it out first. */
+	if (rd_end > p->phys_base && rd_start < p->phys_base + p->mem_size) {
+		copy64(PAYLOAD_RELOC, rd_start, rd_end - rd_start);
+		rd_end = PAYLOAD_RELOC + (rd_end - rd_start);
+		rd_start = PAYLOAD_RELOC;
+		p = (const struct payload *)rd_start;
+		con_hex2("MOVED", "lo=", rd_start, "hi=", rd_end);
+	}
+#endif
 	/* The payload must not overlap where the kernel goes. */
 	if (rd_end > p->phys_base && rd_start < p->phys_base + p->mem_size)
 		return "ramdisk overlaps kernel memory";
