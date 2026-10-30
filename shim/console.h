@@ -1,7 +1,12 @@
 #pragma once
 #include <stdint.h>
 
-#ifdef PIXEL1
+#ifdef GTS4L
+#define FB_BASE		0x9d400000UL	/* reserved-memory splash_region; fb0: 2560x1600, stride 10240 */
+#define FB_W		2560
+#define FB_H		1600
+#define FB_BPP		4
+#elif defined(PIXEL1)
 #define FB_BASE		0xc0001000UL	/* cont_splash_mem = MDP VIG0 SRC0_ADDR */
 #define FB_W		1080
 #define FB_H		1920
@@ -30,6 +35,7 @@ extern volatile uint32_t *con_fb;
 void con_clear(uint32_t bg);
 void con_flush(void);	/* show what was drawn (command-mode panels) */
 void con_skip(void);
+void con_up(void);
 void con_str(const char *label, const char *s);
 void con_hex(const char *label, uint64_t v);
 void con_set_scale(int s);
