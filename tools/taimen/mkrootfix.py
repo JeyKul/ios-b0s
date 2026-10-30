@@ -40,16 +40,19 @@ BUILD, VERSION = '20H392', '16.7.16'
 MOBILE = 501
 WRITE, CREATE, MKDIR, REMOVE, CREATE_Z, RENAME, LIST, PART, FINDRM = 1, 2, 3, 4, 5, 6, 7, 8, 9
 STAGED = 'private/var/staged_system_apps'
-SEVENZIP = os.environ.get('SEVENZIP', '/mnt/c/Program Files/7-Zip/7z.exe')
+WSL = os.path.exists('/mnt/c/Program Files/7-Zip/7z.exe')
+SEVENZIP = os.environ.get('SEVENZIP', '/mnt/c/Program Files/7-Zip/7z.exe' if WSL else '7z')
 
 
 def winpath(p):
+    if not WSL:             # native Linux 7z
+        return p
     return subprocess.run(['wslpath', '-w', p], check=True, capture_output=True, text=True).stdout.strip()
 
 
 def extract(img, paths, dest):
     """Copy root files (paths relative to /) out of the HFS+ image into dest."""
-    names = ['iOSRoot\\' + p.replace('/', '\\') for p in paths]
+    names = ['iOSRoot/' + p if not WSL else 'iOSRoot\\' + p.replace('/', '\\') for p in paths]
     subprocess.run([SEVENZIP, 'x', '-y', '-o' + winpath(dest), winpath(img)] + names,
                    check=True, capture_output=True)
     out = {}
