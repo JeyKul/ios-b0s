@@ -62,6 +62,12 @@ TAIMEN = dict(
           (0x100, 1, 2457600000), (0x101, 1, 2457600000), (0x102, 1, 2457600000), (0x103, 1, 2457600000)],
 )
 
+# Galaxy Tab S4 (gts4llte, MSM8998), from its live FDT and the stage-1 shim register dump
+# (docs/gts4l-probe-results.md): same SoC layout as taimen, 2560x1600 split-DSI panel. S-Boot leaves
+# PP0 autorefresh on and a CTL0 START freezes the panel, so no kickoff-reg: the console only draws.
+if '--gts4l' in sys.argv:
+    TAIMEN.update(fb_w=2560, fb_h=1600, fb_kickoff=None)
+
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
 # The iOS userland is the iPhone X (iPhone10,3 / D22AP) IPSW. MobileGestalt
@@ -302,8 +308,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
             ('stride', u32(P['fb_w'] * P['fb_bpp'] // 8)),
             ('bits-per-pixel', u32(P['fb_bpp'])),
             # write 1 here after drawing: the panel only refreshes on request
-            ('kickoff-reg', u64(P['fb_kickoff'])),
-        ])
+        ] + ([('kickoff-reg', u64(P['fb_kickoff']))] if P['fb_kickoff'] else []))
 
     # bsd/dev/sweet_ufs.c: the UFS host ABL leaves running (absolute physical reg).
     ufs = node('sweet-ufs', [
@@ -375,7 +380,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
 
 
 if __name__ == '__main__':
-    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, pixel1='--pixel1' in sys.argv, taimen='--taimen' in sys.argv)
+    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, pixel1='--pixel1' in sys.argv, taimen='--taimen' in sys.argv or '--gts4l' in sys.argv)
     blob = adt.serialize(root)
     open(sys.argv[1], 'wb').write(blob)
     if '--dump' in sys.argv:
