@@ -1,0 +1,21 @@
+diff --git a/bsd/dev/sweet_perf.c b/bsd/dev/sweet_perf.c
+index 8933fb4..a755f0a 100644
+--- a/bsd/dev/sweet_perf.c
++++ b/bsd/dev/sweet_perf.c
+@@ -764,6 +764,16 @@ taimen_gold(unsigned cap_mhz)
+ 		printf("TAIMEN CLK: gold left at 300 MHz: map failed\n");
+ 		return;
+ 	}
++	/*
++	 * gts4lgold=1 (Galaxy Tab S4): S-Boot leaves gold on its own PLL at 1132.8 MHz (GFMUX cfg 0x300), not on
++	 * GPLL0 as XBL does on taimen. Move it to GPLL0 first, then the steps below run as usual.
++	 */
++	int gts4l = 0;
++	(void)PE_parse_boot_argn("gts4lgold", &gts4l, sizeof(gts4l));
++	if (gts4l && ((clk_rd(tg_mux, 0x54) >> 8) & 7u) != 4u) {
++		bool moved = taimen_gold_mux(TG_CFG_GPLL0);
++		printf("TAIMEN CLK: gold moved to GPLL0: %s, cfg %#x\n", moved ? "ok" : "mux update timeout", clk_rd(tg_mux, 0x54));
++	}
+ 	uint32_t cfg = clk_rd(tg_mux, 0x54), cmd = clk_rd(tg_mux, 0x50), scfg = clk_rd(sm, 0x54);
+ 	printf("TAIMEN CLK: gold osm %#x cfg %#x cmd %#x acc %#x apm %#x S13 %u mV%s; pll user %#x/%#x cfg %#x/%#x\n",
+ 	    osm, cfg, cmd, acc, apm, mv, vok ? "" : " (unread)", clk_rd(tg_pll, 0xc), clk_rd(sp, 0xc),
