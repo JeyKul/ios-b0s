@@ -23,3 +23,8 @@ GPU, first boot (patch 0359 kernel): `a540_zap` accepted by TrustZone, CP works,
 S1 read back 0x0407 after a write of 775 mV (0x0307); the high byte matches PON's 0x04 from the unlocked key poll, so
 this looks like a crossed read, not a real 1031 mV. The clock set stopped there and gfx3d stayed where it was. Patch 0360
 locks the poll and adds `gts4lgpuclk=MHZ`.
+
+GPU at 342 MHz with patch 0360: S1 reads back 775 mV, gfx3d measured 341 MHz, full-screen quad 17 ms.
+
+Metal: `mtltest` 0 FAIL lines (device through Metal.framework, no shaders). `mtlbridgetest` result 0: compute bad 0/1000,
+render bad 0/64, import bad 0/4096; QuartzCore's library 3 kernels ok, 4 failed, 13 pipeline pairs ok, 8 failed.
