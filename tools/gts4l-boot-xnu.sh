@@ -5,6 +5,7 @@
 # taimenwdt=0: S-Boot leaves the APSS watchdog off; keep it off.
 # ROOTFIX=FILE: files the kernel writes into the iOS root (tools/taimen/mkrootfix.py).
 # TAIMEN_MEM=BYTES: XNU's RAM in the upper bank (mkadt.py; default 512 MiB).
+# GPUFW=DIR: a530_pm4.fw, a530_pfp.fw (vendor partition), a540_zap.mdt, a540_zap.b02 (apnhlos) of this tablet.
 # Usage: tools/gts4l-boot-xnu.sh KERNEL DTB_TAIL [extra boot-args]   -> shim/out/gts4l-xnu.img
 set -euo pipefail
 P=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,5 +18,10 @@ cmdline="debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress taimenwdt=0 sweetkeys=
 [ ${#cmdline} -le 607 ] || { echo "boot-args are ${#cmdline} bytes, over the 607 mkpayload keeps" >&2; exit 1; }
 blobs=()
 [ -n "${ROOTFIX:-}" ] && blobs+=(--blob "ROOTFIX=$(realpath "$ROOTFIX")")
+if [ -n "${GPUFW:-}" ]; then
+	for f in pm4 pfp; do tail -c +5 "$GPUFW/a530_$f.fw" > "$out/gpu-$f.bin"; done
+	blobs+=(--blob "GPU-PM4=$out/gpu-pm4.bin" --blob "GPU-PFP=$out/gpu-pfp.bin" \
+		--blob "GPU-ZAP-MDT=$GPUFW/a540_zap.mdt" --blob "GPU-ZAP-SEG=$GPUFW/a540_zap.b02")
+fi
 python3 -I "$P/tools/mkpayload.py" "$kernel" "$out/gts4l.adt" "$out/payload" --l2block 0x200000 --cmdline "$cmdline" "${blobs[@]}"
 EXTRA_CFLAGS="-DSTAGE2 -DNOKICK" OUT=gts4l-xnu.img "$P/shim/build-gts4l.sh" "$tail" "$out/payload"
