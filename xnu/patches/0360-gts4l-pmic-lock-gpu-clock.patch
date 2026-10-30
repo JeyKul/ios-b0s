@@ -1,0 +1,39 @@
+diff --git a/bsd/dev/sweet_gpu.c b/bsd/dev/sweet_gpu.c
+index d25f95a..e35015b 100644
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -2555,6 +2555,16 @@ cp_test(vm_offset_t gpu, int level)
+ 			(void)PE_parse_boot_argn("sweetgpuclk", &mhz, sizeof(mhz));
+ 			g_max_mhz = 300;
+ 			uint64_t us300 = quad_bench();
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++			/* gts4lgpuclk=MHZ: a row of taimen_gfx_set() (the Tab S4's kgsl table tops out at 670) */
++			int gtclk = 0;
++			if (PE_parse_boot_argn("gts4lgpuclk", &gtclk, sizeof(gtclk)) && gtclk > 300 && gtclk <= 670) {
++				lck_mtx_lock(&sweet_gpu_vm_lock);
++				bool gtok = taimen_gfx_set(gpu, (unsigned)gtclk);
++				lck_mtx_unlock(&sweet_gpu_vm_lock);
++				g_max_mhz = gtok ? gtclk : 300;
++			}
++#endif
+ 			if (mhz == 400 || mhz == 600 || mhz == 710) {
+ 				lck_mtx_lock(&sweet_gpu_vm_lock);
+ 				bool ok = gfx_raise(mhz);
+diff --git a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
+index 8bc9bd1..c706c95 100644
+--- a/bsd/dev/sweet_keys.c
++++ b/bsd/dev/sweet_keys.c
+@@ -257,7 +257,13 @@ keys_thread(void *arg, wait_result_t result)
+ 	(void)result;
+ 	for (;;) {
+ 		uint8_t pon = 0;
++		/*
++		 * Under the PMIC lock: unlocked, this poll crossed a GPU rail read (Tab S4 GPU boot: S1 written as
++		 * 775 mV, 0x0307, read back as 0x0407, the high byte PON's 0x04, and the GPU stayed on XO).
++		 */
++		lck_mtx_lock(&sweet_pmic_lock);
+ 		bool pok = keys_read(keys_pon_apid, KEYS_PON_RT, &pon);
++		lck_mtx_unlock(&sweet_pmic_lock);
+ 		int gts4l_volup = 0;
+ 		if (keys_gts4l) {
+ 			uint8_t v = 1;
