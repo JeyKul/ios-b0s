@@ -1,0 +1,83 @@
+diff --git a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
+index afd7363..8bc9bd1 100644
+--- a/bsd/dev/sweet_keys.c
++++ b/bsd/dev/sweet_keys.c
+@@ -59,6 +59,8 @@ bool sweet_pmic_write(uint16_t ppid, uint8_t addr, uint8_t val);
+ 
+ enum { KEY_POWER = 0, KEY_VOLUP = 1, KEY_HOME = 3 };
+ 
++/* gts4lkeys=1 (Galaxy Tab S4): volume up is PM8998 GPIO 6 (0xc500), active low, read only; TLMM 126 is not touched */
++static int keys_gts4l;
+ static vm_offset_t keys_core, keys_obs, keys_cnfg, keys_volup, keys_voldn;
+ static uint16_t keys_pon_apid = KEYS_NO_APID;
+ static uint32_t keys_version, keys_last_status;
+@@ -256,9 +258,15 @@ keys_thread(void *arg, wait_result_t result)
+ 	for (;;) {
+ 		uint8_t pon = 0;
+ 		bool pok = keys_read(keys_pon_apid, KEYS_PON_RT, &pon);
++		int gts4l_volup = 0;
++		if (keys_gts4l) {
++			uint8_t v = 1;
++			(void)sweet_pmic_read(0x0c5, 0x08, &v);
++			gts4l_volup = !(v & 1u);
++		}
+ 		int now[3] = {
+ 			!!(pon & 1u),
+-			!(keys_rd(keys_volup, 4) & 1u),
++			keys_gts4l ? gts4l_volup : !(keys_rd(keys_volup, 4) & 1u),
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+ 			!!(pon & 2u),                   /* RESIN */
+ #else
+@@ -304,7 +312,13 @@ sweet_keys_init(void)
+ 		printf("SWEET KEYS: disabled (sweetkeys=0); PMIC arbiter %#x kept for reads\n", keys_version);
+ 		return;
+ 	}
+-	keys_volup = keys_gpio_map(KEYS_GPIO_VOLUP);
++	(void)PE_parse_boot_argn("gts4lkeys", &keys_gts4l, sizeof(keys_gts4l));
++	if (keys_gts4l) {
++		uint8_t st = 0, rt = 0, mode = 0;
++		bool ok = sweet_pmic_read(0x0c5, 0x08, &st) && sweet_pmic_read(0x0c5, 0x10, &rt) && sweet_pmic_read(0x0c5, 0x40, &mode);
++		printf("GTS4L KEYS: pm8998 gpio6 read %d status %#x rt %#x mode %#x\n", ok, st, rt, mode);
++	}
++	keys_volup = keys_gts4l ? (vm_offset_t)1 : keys_gpio_map(KEYS_GPIO_VOLUP);
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+ 	keys_voldn = keys_volup;                /* unused: volume down is PON RESIN */
+ #else
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index ab99a48..fef7d62 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -1460,14 +1460,27 @@ AppleCLCD::present(const uint8_t *rec)
+ 			int32_t ox = ((int32_t)fWidth - lh) / 2, oy = ((int32_t)fHeight - lw) / 2;
+ 			if (w > 0 && h > 0 && ox >= 0 && oy >= 0 && (uint64_t)s->offset + (uint64_t)(sy + h - 1) * s->bytesPerRow +
+ 			    (uint64_t)(sx + w) * 4 <= s->memory->getLength()) {
+-				for (int32_t y = 0; y < h; y++) {
+-					const uint32_t *in = (const uint32_t *)(src + s->offset + (uint64_t)(sy + y) * s->bytesPerRow + (uint64_t)sx * 4);
+-					int32_t px = rot == 1 ? ox + lh - 1 - (dy + y) : ox + dy + y;
+-					for (int32_t x = 0; x < w; x++) {
+-						int32_t py = rot == 1 ? oy + dx + x : oy + lw - 1 - (dx + x);
+-						*(volatile uint32_t *)(fPixels + (uint64_t)py * fRowBytes + (uint64_t)px * 4) = in[x];
++				/*
++				 * Blocks, so the source stays in the cache, and each panel row written in address
++				 * order, so the write-combine buffer can merge (one pixel per row: 41 ms a frame).
++				 */
++				const uintptr_t base = src + s->offset + (uint64_t)sy * s->bytesPerRow + (uint64_t)sx * 4;
++				for (int32_t by = 0; by < h; by += 32) {
++					int32_t ye = MIN(by + 32, h);
++					for (int32_t bx = 0; bx < w; bx += 32) {
++						int32_t xe = MIN(bx + 32, w);
++						for (int32_t x = bx; x < xe; x++) {
++							int32_t py = rot == 1 ? oy + dx + x : oy + lw - 1 - (dx + x);
++							int32_t px = rot == 1 ? ox + lh - 1 - (dy + ye - 1) : ox + dy + by;
++							uint32_t *out = (uint32_t *)(fPixels + (uint64_t)py * fRowBytes + (uint64_t)px * 4);
++							for (int32_t n = 0; n < ye - by; n++) {
++								int32_t y = rot == 1 ? ye - 1 - n : by + n;
++								out[n] = *(const uint32_t *)(base + (uint64_t)y * s->bytesPerRow + (uint64_t)x * 4);
++							}
++						}
+ 					}
+ 				}
++				__asm__ volatile("dsb sy" ::: "memory");
+ 			}
+ 			s->release();
+ 			continue;
