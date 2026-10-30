@@ -34,3 +34,5 @@ RAM: TAIMEN_BASE=0xb1000000 TAIMEN_MEM=0xbd400000 boots (max_mem 0xbd400000). S-
 USB: S-Boot leaves the DWC3 powered and clocked with the USB3 PHY in reset. sweetusb=2, at SuperSpeed and with sweetusbss=0, times out on the first endpoint command. Patch 0362 adds gts4lusbutmi=1, the high-speed-only clock switch from Samsung's dwc3-msm.c.
 
 Gold: S-Boot leaves gold on its PLL at 1132.8 MHz (GFMUX cfg 0x300). Patch 0361 adds gts4lgold=1. The chip's open-loop fuses differ from the Pixel's, so `taimenosm` refuses and its tables must not be reused.
+
+Gold at 1728 MHz (gts4lgold=1 taimengold=1728 taimenamp=1): every step's self-test passed on cpu4-7, no panic in the first short run, hottest sensor 58.7 C.
