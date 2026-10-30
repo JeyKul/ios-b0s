@@ -1,0 +1,35 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+index 203dc59..2b29f89 100644
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -1722,6 +1722,30 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	ud_if_create();
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+ 	ud_phys_on();
++	/*
++	 * gts4lusbutmi=1 (Galaxy Tab S4): S-Boot leaves the USB3 PHY in reset and it does not restart here, so
++	 * the core has no PIPE clock and every endpoint command times out, at high speed too. Run the PIPE
++	 * side from the UTMI clock, in the order dwc3-msm.c's dwc3_msm_switch_utmi uses (0x08 GENERAL_CFG:
++	 * bit 8 PIPE_UTMI_CLK_DIS, bit 3 PIPE3_PHYSTATUS_SW, bit 0 PIPE_UTMI_CLK_SEL).
++	 */
++	int utmi = 0;
++	PE_parse_boot_argn("gts4lusbutmi", &utmi, sizeof(utmi));
++	if (utmi) {
++		vm_offset_t qsc = ml_io_map(QSCRATCH_PA, 0x100);
++		if (qsc != 0) {
++			uint32_t was = usb_rd(qsc, 0x08);
++			*(volatile uint32_t *)(qsc + 0x08) = was | (1u << 8);
++			__asm__ volatile("dsb sy" ::: "memory");
++			delay(5);
++			*(volatile uint32_t *)(qsc + 0x08) = usb_rd(qsc, 0x08) | (1u << 3) | 1u;
++			__asm__ volatile("dsb sy" ::: "memory");
++			delay(5);
++			*(volatile uint32_t *)(qsc + 0x08) = usb_rd(qsc, 0x08) & ~(1u << 8);
++			__asm__ volatile("dsb sy" ::: "memory");
++			delay(5);
++			printf("GTS4L USB: GENERAL_CFG 0x%08x -> 0x%08x (PIPE from UTMI)\n", was, usb_rd(qsc, 0x08));
++		}
++	}
+ #endif
+ 
+ 	/*
