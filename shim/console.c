@@ -31,7 +31,18 @@ static void put_px(int x, int y, uint32_t c)
 
 void con_flush(void)
 {
-#ifdef TAIMEN
+#ifdef GTS4L
+	/*
+	 * Blind command-mode kick: CTL0 START and a counted wait. Touches no status
+	 * register and no timer, so it cannot be the thing that hangs a diagnostic.
+	 */
+#ifndef NOKICK
+	*(volatile uint32_t *)0xc90201cUL = 1;
+	__asm__ volatile("dsb sy" ::: "memory");
+#endif
+	for (volatile uint32_t i = 0; i < 2000000; i++)
+		;
+#elif defined(TAIMEN)
 	/*
 	 * Same command-mode kick as Pixel 1, at the MSM8998 MDSS base: clear
 	 * PING_PONG_0_DONE (INTR_CLEAR 0xc901018 bit 8), CTL0 START 0xc90201c,
@@ -113,6 +124,11 @@ static void fmt_hex(char *buf, uint64_t v, int digits)
 void con_skip(void)
 {
 	row++;
+}
+
+void con_up(void)
+{
+	row--;
 }
 
 void con_str(const char *label, const char *s)
