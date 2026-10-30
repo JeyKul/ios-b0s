@@ -1,0 +1,64 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+index 2b29f89..95d050f 100644
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -1703,6 +1703,47 @@ ud_phys_on(void)
+ }
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++extern bool sweet_rpm_ldoa_set(unsigned ldo, uint32_t uv, uint32_t set);
++
++/*
++ * gts4lusbutmi=1 (Galaxy Tab S4): S-Boot leaves the QUSB2 PHY powered down. Clearing POWER_DOWN alone gave a
++ * core that runs and a link the host never sees. The rest of Samsung's qusb_phy_init (phy-msm-qusb-v2.c) with
++ * this tablet's DT values: the rails, the 1.8 V clamp released, qcom,qusb-phy-init-seq, TUNE1 from the fuse.
++ */
++static void
++gts4l_qusb_init(void)
++{
++	static const struct { unsigned ldo; uint32_t uv; } rail[] = {{1, 880000}, {2, 1200000}, {12, 1800000}, {24, 3088000}};
++	static const uint16_t seq[][2] = {{0x13, 0x04}, {0x7c, 0x18c}, {0x80, 0x2c}, {0x0a, 0x184}, {0x00, 0x21c},
++		                          {0xa5, 0x23c}, {0x0d, 0x240}, {0x03, 0x248}, {0x19, 0xb4}};
++	for (unsigned i = 0; i < sizeof(rail) / sizeof(rail[0]); i++) {
++		for (uint32_t set = 0; set < 2; set++) {
++			(void)sweet_rpm_ldoa_set(rail[i].ldo, rail[i].uv, set);
++		}
++	}
++	delay(1000);
++	vm_offset_t hs = ml_io_map(QUSB2_PA, QUSB2_SIZE), tcsr = ml_io_map(0x01fcb000, 0x1000), fuse = ml_io_map(0x00784000, 0x1000);
++	if (hs == 0 || tcsr == 0 || fuse == 0) {
++		printf("GTS4L USB: PHY map failed\n");
++		return;
++	}
++	phy_wr(tcsr, 0x24c, 1);
++	phy_wr(hs, QUSB2_PWR_CTRL1, (usb_rd(hs, QUSB2_PWR_CTRL1) & 0xff) | 1u);
++	for (unsigned i = 0; i < sizeof(seq) / sizeof(seq[0]); i++) {
++		phy_wr(hs, seq[i][1], seq[i][0]);
++	}
++	uint32_t tune = (usb_rd(fuse, 0x238) >> 16) & 0xf;
++	tune = tune + 0xa >= 0xf ? 0xf : tune + 0xa;    /* SS_SYNC_VALUE, as Samsung's build */
++	phy_wr(hs, 0x23c, (usb_rd(hs, 0x23c) & 0x0f) | (tune << 4));
++	phy_wr(hs, QUSB2_PWR_CTRL1, usb_rd(hs, QUSB2_PWR_CTRL1) & 0xfe);
++	delay(200);
++	printf("GTS4L USB: QUSB2 init: PWR_CTRL1 0x%02x PLL 0x%02x TUNE1 0x%02x TUNE2 0x%02x clamp 0x%x\n",
++	    usb_rd(hs, QUSB2_PWR_CTRL1) & 0xff, usb_rd(hs, QUSB2_PLL_STATUS) & 0xff, usb_rd(hs, 0x23c) & 0xff,
++	    usb_rd(hs, 0x240) & 0xff, usb_rd(tcsr, 0x24c));
++}
++#endif
++
+ static void
+ sweet_usb_gadget_start(vm_offset_t dwc)
+ {
+@@ -1721,6 +1762,11 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	ud.dma_pa = ptoa_64(pn);
+ 	ud_if_create();
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
++	int gts4l_phy = 0;
++	PE_parse_boot_argn("gts4lusbutmi", &gts4l_phy, sizeof(gts4l_phy));
++	if (gts4l_phy) {
++		gts4l_qusb_init();
++	}
+ 	ud_phys_on();
+ 	/*
+ 	 * gts4lusbutmi=1 (Galaxy Tab S4): S-Boot leaves the USB3 PHY in reset and it does not restart here, so
