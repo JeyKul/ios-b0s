@@ -7,6 +7,7 @@
  */
 #include <stdint.h>
 #include "console.h"
+#include "loader.h"
 
 #define PSCI_SYSTEM_RESET	0x84000009UL
 #define PS_HOLD		0x10ac000UL	/* restart@10ac000 */
@@ -81,6 +82,12 @@ void shim_main(uint64_t dtb)
 	con_hex("SCTLR", rsr("sctlr_el1"));
 	con_hex("CNTFRQ", rsr("cntfrq_el0"));
 	con_flush();
+#ifdef STAGE2
+	/* Act as iBoot: the SWEETXNU payload is the boot image's ramdisk. */
+	const char *why = loader_boot(dtb);
+	con_str("LOADER", why);
+	hang();
+#endif
 	/* Do repeated kicks reach the panel at all? No register reads yet. */
 	con_str("KICK", "1");
 	con_flush();
