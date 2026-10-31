@@ -1,0 +1,159 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+index bde76e6..90cd166 100644
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -1644,10 +1644,12 @@ qmp_tables(vm_offset_t qmp, bool write)
+ 	return diff;
+ }
+ 
++static int gts4l_usb_flip = -1;       /* USB3 lane from the plug orientation (gts4l_ptn_init) */
++
+ static void
+ ud_phys_on(void)
+ {
+-	int mode = 1, flip = -1;
++	int mode = 1, flip = gts4l_usb_flip;
+ 	PE_parse_boot_argn("sweetusbphy", &mode, sizeof(mode));
+ 	PE_parse_boot_argn("sweetusbflip", &flip, sizeof(flip));
+ 	vm_offset_t gcc = ml_io_map(GCC_PA, GCC_SIZE);
+@@ -1757,6 +1759,132 @@ gts4l_qusb_init(void)
+ }
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++/*
++ * gts4lusbss=1 (Galaxy Tab S4): SuperSpeed reaches the port through a PTN36502 redriver at 0x1a on a GPIO I2C bus
++ * (SDA 93, SCL 94, EAST tile). Values as ptn36502.c and TWRP's log on this tablet: its LDO on (PM8998 GPIO 15),
++ * INIT_MODE, safe state, then USB3_ONLY_MODE as UFP. GPIO 38 high means a "REAR" plug: mode 0x81 and USB3 lane B.
++ */
++extern bool sweet_pmic_read(uint16_t ppid, uint8_t addr, uint8_t *out);
++extern bool sweet_pmic_write(uint16_t ppid, uint8_t addr, uint8_t val);
++static vm_offset_t gt_sda, gt_scl;
++
++/* Open drain: the output level stays low, OE low lets the line float high. */
++static void
++gt_line(vm_offset_t t, bool high)
++{
++	phy_wr(t, 0, high ? 0u : 0x200u);
++	delay(5);
++}
++
++static void
++gt_i2c_start(void)
++{
++	gt_line(gt_sda, true);
++	gt_line(gt_scl, true);
++	gt_line(gt_sda, false);
++	gt_line(gt_scl, false);
++}
++
++static void
++gt_i2c_stop(void)
++{
++	gt_line(gt_sda, false);
++	gt_line(gt_scl, true);
++	gt_line(gt_sda, true);
++}
++
++/* true when the chip acked */
++static bool
++gt_i2c_byte(uint8_t b)
++{
++	for (int i = 7; i >= 0; i--) {
++		gt_line(gt_sda, (b >> i) & 1);
++		gt_line(gt_scl, true);
++		gt_line(gt_scl, false);
++	}
++	gt_line(gt_sda, true);
++	gt_line(gt_scl, true);
++	bool ack = !(usb_rd(gt_sda, 4) & 1);
++	gt_line(gt_scl, false);
++	return ack;
++}
++
++static bool
++gt_ptn_wr(uint8_t reg, uint8_t val)
++{
++	gt_i2c_start();
++	bool ok = gt_i2c_byte(0x1a << 1) && gt_i2c_byte(reg) && gt_i2c_byte(val);
++	gt_i2c_stop();
++	return ok;
++}
++
++static int
++gt_ptn_rd(uint8_t reg)
++{
++	int v = -1;
++	gt_i2c_start();
++	if (gt_i2c_byte(0x1a << 1) && gt_i2c_byte(reg)) {
++		gt_i2c_start();
++		if (gt_i2c_byte((0x1a << 1) | 1)) {
++			v = 0;
++			for (int i = 7; i >= 0; i--) {
++				gt_line(gt_scl, true);
++				v |= (int)(usb_rd(gt_sda, 4) & 1) << i;
++				gt_line(gt_scl, false);
++			}
++			gt_line(gt_sda, true);          /* NACK */
++			gt_line(gt_scl, true);
++			gt_line(gt_scl, false);
++		}
++	}
++	gt_i2c_stop();
++	return v;
++}
++
++static void
++gts4l_ptn_init(void)
++{
++	uint8_t sub = 0, mode = 0, src = 0, en = 0;
++	bool rd = sweet_pmic_read(0x0ce, 0x05, &sub) && sweet_pmic_read(0x0ce, 0x40, &mode) &&
++	    sweet_pmic_read(0x0ce, 0x44, &src) && sweet_pmic_read(0x0ce, 0x46, &en);
++	printf("GTS4L USB: pm8998 gpio15 read %d subtype 0x%02x mode 0x%02x src 0x%02x en 0x%02x\n", rd, sub, mode, src, en);
++	if (rd) {
++		/* output high: LV/MV subtypes have mode in 0x40 and invert in 0x44; older ones keep both in 0x40 */
++		bool wr = sub >= 0x10 ? sweet_pmic_write(0x0ce, 0x40, 0x01) && sweet_pmic_write(0x0ce, 0x44, 0x80) :
++		    sweet_pmic_write(0x0ce, 0x40, 0x11);
++		wr = wr && sweet_pmic_write(0x0ce, 0x46, 0x80);
++		printf("GTS4L USB: redriver LDO %s\n", wr ? "on" : "write failed");
++	}
++	vm_offset_t en9 = ml_io_map(0x03d09000, 0x1000), con = ml_io_map(0x03526000, 0x1000);
++	gt_sda = ml_io_map(0x03d5d000, 0x1000);
++	gt_scl = ml_io_map(0x03d5e000, 0x1000);
++	if (en9 == 0 || con == 0 || gt_sda == 0 || gt_scl == 0) {
++		printf("GTS4L USB: redriver map failed\n");
++		return;
++	}
++	phy_wr(en9, 0, 0);                              /* input, no pull: ptn36502_set_gpios */
++	phy_wr(gt_sda, 4, 0);
++	phy_wr(gt_scl, 4, 0);
++	gt_line(gt_sda, true);
++	gt_line(gt_scl, true);
++	delay(20000);
++	bool rear = usb_rd(con, 4) & 1;
++	printf("GTS4L USB: enable %u, gpio38 %u (%s), SDA %u SCL %u, chip id %d rev %d\n", usb_rd(en9, 4) & 1, rear, rear ? "REAR" : "FRONT",
++	    usb_rd(gt_sda, 4) & 1, usb_rd(gt_scl, 4) & 1, gt_ptn_rd(0x00), gt_ptn_rd(0x01));
++	static const uint8_t init[][2] = {{0x0d, 0x81}, {0x0b, 0x48}, {0x06, 0x0e}, {0x04, 0x92}, {0x05, 0x52},
++		                          {0x07, 0x29}, {0x08, 0x29}, {0x09, 0x29}, {0x0a, 0x29}, {0x0d, 0x80}};
++	unsigned failed = 0;
++	for (unsigned i = 0; i < sizeof(init) / sizeof(init[0]); i++) {
++		failed += !gt_ptn_wr(init[i][0], init[i][1]);
++	}
++	failed += !gt_ptn_wr(0x0b, rear ? 0x81 : 0xa1);
++	gts4l_usb_flip = rear ? 1 : 0;
++	printf("GTS4L USB: redriver: %u writes failed, 0x04 %d 0x0b %d 0x0d %d, USB3 lane %c\n", failed, gt_ptn_rd(0x04), gt_ptn_rd(0x0b),
++	    gt_ptn_rd(0x0d), rear ? 'B' : 'A');
++}
++#endif
++
+ static void
+ sweet_usb_gadget_start(vm_offset_t dwc)
+ {
+@@ -1800,6 +1928,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 			delay(10);
+ 			printf("GTS4L USB: USB3 PHY reset, clamp 0x%x phymode 0x%x\n", usb_rd(tc, 0x244), usb_rd(tc, 0x248));
+ 		}
++		gts4l_ptn_init();
+ 	}
+ 	ud_phys_on();
+ 	/*
