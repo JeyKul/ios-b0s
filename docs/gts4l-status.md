@@ -42,3 +42,5 @@ Apps: the 32 stock apps installed from `mkrootfix --apps-archive` on the `cache`
 USB: patches 0363-0364 (QUSB2 rails, clamp, init sequence, reset) with the UTMI switch: the core runs, link state goes to suspend, the host sees nothing. taimen connected at high speed with the USB3 PHY running (boot 133), so 0365 adds gts4lusbss=1 to reset and start the USB3 PHY as Samsung's driver does.
 
 USB networking works (0366): redriver set up as TWRP does, USB3 lane from GPIO 38. Boot args `sweetusb=2 gts4lusbss=1` (no gts4lusbutmi or sweetusbss). The PC sees "Sweet iOS (USB Ethernet)" through cdc_ncm at 5000M, tablet at 192.168.7.2, ping about 1 ms. lockdownd's port 62078 answers.
+
+S Pen (0367): gts4lpen=1 works as a finger; needs gts4lpenflip=2 (top and bottom were mirrored). Screen off works: black memory on an AMOLED when iOS sleeps the display. Fingers unaffected.
