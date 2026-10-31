@@ -152,7 +152,7 @@ def launchd(plist, daemons=()):
         if '_PanicOnCrash' in job:
             job['_PanicOnCrasX'] = job.pop('_PanicOnCrash')
             renamed += 1
-    gone = ('com.apple.CommCenter', 'com.apple.fairplayd.H2', 'com.apple.voicemail.vmd',
+    gone = ('com.apple.CommCenter', 'com.apple.fairplayd.H2', 'com.apple.fairplayd.A2', 'com.apple.voicemail.vmd',
             'com.apple.ReportCrash', 'com.apple.spindump', 'com.apple.tailspind',
             'com.apple.aggregated', 'com.apple.aggregated.addaily',
             # boot 149: relaunched 546 times in 15 minutes (on demand, ThrottleInterval 0), exits at once
