@@ -18,6 +18,7 @@ import time
 import urllib.parse
 
 AGENT_PORT, STATUS_PORT = 5142, 5143
+DNS_HOST = None     # --dns: netsvcd's DNS over TCP goes here, for networks that block outside DNS servers
 stats = {'requests': 0, 'failed': 0, 'up': 0, 'down': 0}
 
 
@@ -51,14 +52,14 @@ async def handle(head, r, w):
         if method == b'CONNECT':
             host, _, port = target.decode().rpartition(':')
             host, port = host.strip('[]'), int(port)
-            ur, uw = await asyncio.wait_for(asyncio.open_connection(host, port), 20)
+            ur, uw = await asyncio.wait_for(asyncio.open_connection(DNS_HOST if DNS_HOST and port == 53 else host, port, happy_eyeballs_delay=0.25), 20)
             w.write(b'HTTP/1.1 200 Connection established\r\n\r\n')
             await w.drain()
         else:
             u = urllib.parse.urlsplit(target.decode())
             host, port = u.hostname, u.port or 80
             path = (u.path or '/') + ('?' + u.query if u.query else '')
-            ur, uw = await asyncio.wait_for(asyncio.open_connection(host, port), 20)
+            ur, uw = await asyncio.wait_for(asyncio.open_connection(DNS_HOST if DNS_HOST and port == 53 else host, port, happy_eyeballs_delay=0.25), 20)
             hdrs = [h for h in rest.split(b'\r\n') if h and not h.lower().startswith(b'proxy-')]
             uw.write(b' '.join([method, path.encode(), version]) + b'\r\n' + b'\r\n'.join(hdrs) + b'\r\n\r\n')
             await uw.drain()
@@ -142,7 +143,9 @@ if __name__ == '__main__':
     ap.add_argument('--pool', type=int, default=24, help='idle connections kept open (default 24)')
     ap.add_argument('--minutes', type=float, default=0, help='stop after this long (default: never)')
     ap.add_argument('--status', action='store_true', help="print netsvcd's state and exit")
+    ap.add_argument('--dns', help="send the phone's DNS (port 53) to this server instead of 1.1.1.1")
     a = ap.parse_args()
+    DNS_HOST = a.dns
     if a.status:
         status(a.phone)
     else:
