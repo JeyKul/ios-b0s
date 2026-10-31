@@ -1,0 +1,66 @@
+diff --git a/bsd/dev/taimen_touch.c b/bsd/dev/taimen_touch.c
+index 28ac819..92d3a0e 100644
+--- a/bsd/dev/taimen_touch.c
++++ b/bsd/dev/taimen_touch.c
+@@ -886,8 +886,8 @@ gt_event(const uint8_t *e, uint32_t *mask, int *x, int *y)
+ 		tx = (gt_flip & 1) ? 1599 - tx : tx;
+ 		ty = (gt_flip & 2) ? 2559 - ty : ty;
+ 		*mask |= 1u << id;
+-		x[id] = gt_ipad ? tx - (1600 - 1536) / 2 : tx - (1600 - 1125) / 2 + 157;
+-		y[id] = gt_ipad ? ty - (2560 - 2048) / 2 : ty - (2560 - 2436) / 2 + 222;
++		x[id] = gt_ipad == 2 ? tx : gt_ipad ? tx - (1600 - 1536) / 2 : tx - (1600 - 1125) / 2 + 157;
++		y[id] = gt_ipad == 2 ? ty : gt_ipad ? ty - (2560 - 2048) / 2 : ty - (2560 - 2436) / 2 + 222;
+ 	}
+ }
+ 
+@@ -1016,8 +1016,8 @@ gp_poll(void)
+ 	int tx = y * 1599 / GP_MAX_Y, ty = x * 2559 / GP_MAX_X;
+ 	tx = (gp.flip & 1) ? 1599 - tx : tx;
+ 	ty = (gp.flip & 2) ? 2559 - ty : ty;
+-	int px = gt_ipad ? tx - (1600 - 1536) / 2 : tx - (1600 - 1125) / 2 + 157;
+-	int py = gt_ipad ? ty - (2560 - 2048) / 2 : ty - (2560 - 2436) / 2 + 222;
++	int px = gt_ipad == 2 ? tx : gt_ipad ? tx - (1600 - 1536) / 2 : tx - (1600 - 1125) / 2 + 157;
++	int py = gt_ipad == 2 ? ty : gt_ipad ? ty - (2560 - 2048) / 2 : ty - (2560 - 2436) / 2 + 222;
+ 	if (tip != gp.tip && logged < 80) {
+ 		logged++;
+ 		printf("GTS4L PEN: %s raw %02x x %d y %d -> %d,%d pressure %d tilt %d,%d\n", tip ? "down" : "up", d[0], x, y, tx, ty, p, tilt_x, tilt_y);
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 9db668c..0d527ad 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -527,9 +527,10 @@ AppleCLCD::start(IOService *provider)
+ 	/* gts4lipad=1: iPadOS on the Galaxy Tab S4, presented as the iPad 6's 1536x2048 portrait panel (with gts4lrot) */
+ 	int gts4l_ipad = 0;
+ 	if (PE_parse_boot_argn("gts4lipad", &gts4l_ipad, sizeof(gts4l_ipad)) && gts4l_ipad != 0) {
+-		fLogicalW = 1536;
+-		fLogicalH = 2048;
+-		sweet_fb_ppi = 264;
++		/* gts4lipad=2: the whole panel, 1600x2560 at its real density */
++		fLogicalW = gts4l_ipad == 2 ? 1600 : 1536;
++		fLogicalH = gts4l_ipad == 2 ? 2560 : 2048;
++		sweet_fb_ppi = gts4l_ipad == 2 ? 287 : 264;
+ 	}
+ #endif
+ 	fOffX = (int32_t)(fLogicalW - fWidth) / 2;
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 6fea46a..28d7322 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -2036,13 +2036,13 @@ SweetHIDTouch::start(IOService *provider)
+ 	/* gts4lipad=1: the iPad 6's 1536x2048; the touch driver then sends canvas pixels, no border offsets */
+ 	int ipad = 0;
+ 	if (PE_parse_boot_argn("gts4lipad", &ipad, sizeof(ipad)) && ipad != 0) {
+-		fLogicalW = 1536;
+-		fLogicalH = 2048;
++		fLogicalW = ipad == 2 ? 1600 : 1536;
++		fLogicalH = ipad == 2 ? 2560 : 2048;
+ 		fOffX = 0;
+ 		fOffY = 0;
+ 		fCanvasInput = true;
+-		setProperty("SurfaceWidth", (unsigned long long)(148 << 16), 32);
+-		setProperty("SurfaceHeight", (unsigned long long)(197 << 16), 32);
++		setProperty("SurfaceWidth", (unsigned long long)((ipad == 2 ? 141 : 148) << 16), 32);
++		setProperty("SurfaceHeight", (unsigned long long)((ipad == 2 ? 226 : 197) << 16), 32);
+ 	}
+ #else
+ 	fLogicalW = SWEET_TOUCH_PANEL_W;
