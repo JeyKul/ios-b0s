@@ -1,0 +1,262 @@
+diff --git a/bsd/dev/taimen_touch.c b/bsd/dev/taimen_touch.c
+index 6234540..4860767 100644
+--- a/bsd/dev/taimen_touch.c
++++ b/bsd/dev/taimen_touch.c
+@@ -37,7 +37,7 @@ void taimen_touch_init(void);
+ #define TT_GCC_AHB_PA   0x00117000u     /* +4: BLSP1_AHB_CBCR, bit 31 CLK_OFF */
+ #define TT_GCC_QUP_PA   0x00121000u     /* +8: QUP5 I2C APPS CBCR, +0x20/+0x24: CMD/CFG RCGR */
+ #define TT_QUP_PA       0x0c179000u
+-#define TT_ADDR         0x49u
++#define TT_ADDR         tt.addr         /* the Tab S4's pen shares this code on its own QUP */
+ #define TT_MAX          10u             /* FINGER_MAX */
+ #define TT_FIFO_MAX     32u
+ 
+@@ -103,7 +103,7 @@ static int tt_sleep_chan;
+ static struct {
+ 	bool started;
+ 	vm_offset_t vote, ahb, gccqup, qup, gpio[G_COUNT];
+-	uint32_t ahb_vote;
++	uint32_t ahb_vote, addr;
+ 	unsigned rx_max;
+ 	uint32_t active, palm;
+ 	int x[TT_MAX], y[TT_MAX];
+@@ -704,6 +704,7 @@ tt_thread(void *arg, wait_result_t result)
+ 	printf("TAIMEN TOUCH: starting in %u s\n", delay_s);
+ 	tt_wait(delay_s * 1000u);
+ 	tt.ahb_vote = 1u << 17;
++	tt.addr = 0x49u;
+ 	tt.vote = ml_io_map(TT_GCC_VOTE_PA, 0x1000);
+ 	tt.ahb = ml_io_map(TT_GCC_AHB_PA, 0x1000);
+ 	tt.gccqup = ml_io_map(TT_GCC_QUP_PA, 0x1000);
+@@ -917,6 +918,121 @@ gt_poll(void)
+ 	return 0;
+ }
+ 
++/*
++ * The Tab S4's S Pen: Wacom W9019 ("wacom,w90xx") at I2C 0x56 on BLSP2 QUP3 (0xc1b7000), from its live DT and
++ * Samsung's drivers/input/wacom/wacom_i2c.c. Boot-arg gts4lpen=1 reports the tip as a finger, =2 as a stylus with
++ * pressure and tilt. The firmware write pin stays low and the flash code is left out: nothing here can reflash it.
++ *   power    wacom_3.3v, GPIO 124 high; FWE GPIO 126 low; IRQ 125 (low while data is waiting) and PDCT 123 in
++ *   pins     SDA 51 / SCL 52 function 3 (NORTH)
++ *   clocks   QUP3 I2C CBCR 0x12a008, RCGR 0x12a020/24
++ *   chip     0x2a query, 0x31 start at 133 Hz; 13-byte reports: 0 flags (0x80 ready, 0x20 button, 0x10 in range),
++ *            1-2 x, 3-4 y, 5-6 pressure, 8-9 tilt (signed), 12 bit 7 soft key; DT invert x and y
++ * x runs along the long side, the touch panel's y. gts4lpenflip bit 0 / 1 mirrors touch x / y.
++ */
++#define GP_MAX_X        22656
++#define GP_MAX_Y        14160
++extern void sweet_hid_pen(int down, int x, int y, int pressure, int tilt_x, int tilt_y);
++
++static struct {
++	int mode, flip;
++	vm_offset_t qup, gcc, irq;
++	bool up, tip;
++	int last_x, last_y;
++	uint64_t last_move;
++	vm_offset_t touch_qup, touch_gcc;
++} gp;
++
++static void
++gp_bus(bool pen)
++{
++	tt.qup = pen ? gp.qup : gp.touch_qup;
++	tt.gccqup = pen ? gp.gcc : gp.touch_gcc;
++	tt.addr = pen ? 0x56u : 0x49u;
++}
++
++static void
++gp_init(void)
++{
++	vm_offset_t en = ml_io_map(0x03d7c000u, 0x1000), fwe = ml_io_map(0x03d7e000u, 0x1000), pdct = ml_io_map(0x03d7b000u, 0x1000);
++	vm_offset_t sda = ml_io_map(0x03933000u, 0x1000), scl = ml_io_map(0x03934000u, 0x1000);
++	gp.irq = ml_io_map(0x03d7d000u, 0x1000);
++	gp.qup = ml_io_map(0x0c1b7000u, 0x1000);
++	gp.gcc = ml_io_map(0x0012a000u, 0x1000);
++	gp.touch_qup = tt.qup;
++	gp.touch_gcc = tt.gccqup;
++	if (!en || !fwe || !pdct || !sda || !scl || !gp.irq || !gp.qup || !gp.gcc) {
++		printf("GTS4L PEN: MMIO mapping failed\n");
++		return;
++	}
++	tt_wr(fwe, 4, 0);
++	tt_wr(fwe, 0, 0x200u);                  /* output low: never firmware mode */
++	tt_wr(gp.irq, 0, 0);
++	tt_wr(pdct, 0, 0);
++	tt_wr(sda, 0, 3u << 2);
++	tt_wr(scl, 0, 3u << 2);
++	tt_wr(en, 4, 2);
++	tt_wr(en, 0, 0x200u);
++	tt_wait(200);
++	gp_bus(true);
++	if (!tt_clocks() || !qup_init()) {
++		gp_bus(false);
++		printf("GTS4L PEN: bus failed\n");
++		return;
++	}
++	uint8_t q[15] = {0}, cmd = 0x2a;
++	int err = ftm_write(&cmd, 1);
++	tt_wait(35);
++	int err2 = err ? err : qup_msg(true, q, sizeof(q));
++	printf("GTS4L PEN: query err %d/%d status %#x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x, irq %u pdct %u\n",
++	    err, err2, tt.last_status, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8], q[9], q[10], q[11], q[12], q[13], q[14],
++	    tt_rd(gp.irq, 4) & 1u, tt_rd(pdct, 4) & 1u);
++	if (err2 == 0) {
++		cmd = 0x31;
++		err2 = ftm_write(&cmd, 1);
++	}
++	gp_bus(false);
++	gp.up = err2 == 0;
++	printf("GTS4L PEN: %s, mode %d flip %d\n", gp.up ? "running" : "not started", gp.mode, gp.flip);
++}
++
++static void
++gp_poll(void)
++{
++	static unsigned logged;
++	if (!gp.up || (tt_rd(gp.irq, 4) & 1u)) {
++		return;
++	}
++	uint8_t d[13];
++	gp_bus(true);
++	int err = qup_msg(true, d, sizeof(d));
++	gp_bus(false);
++	if (err || !(d[0] & 0x80) || (d[12] & 0x80)) {
++		return;
++	}
++	bool range = d[0] & 0x10;
++	int x = GP_MAX_X - ((d[1] << 8) | d[2]), y = GP_MAX_Y - ((d[3] << 8) | d[4]), p = (d[5] << 8) | d[6];
++	int tilt_x = -(int8_t)d[8], tilt_y = -(int8_t)d[9];
++	bool tip = range && p > 0;
++	int tx = y * 1599 / GP_MAX_Y, ty = x * 2559 / GP_MAX_X;
++	tx = (gp.flip & 1) ? 1599 - tx : tx;
++	ty = (gp.flip & 2) ? 2559 - ty : ty;
++	int px = tx - (1600 - 1125) / 2 + 157, py = ty - (2560 - 2436) / 2 + 222;
++	if (tip != gp.tip && logged < 80) {
++		logged++;
++		printf("GTS4L PEN: %s raw %02x x %d y %d -> %d,%d pressure %d tilt %d,%d\n", tip ? "down" : "up", d[0], x, y, tx, ty, p, tilt_x, tilt_y);
++	}
++	uint64_t now = mach_absolute_time();
++	if (tip != gp.tip || (tip && now - gp.last_move >= tt_move_gap)) {
++		gp.last_move = now;
++		if (gp.mode >= 2) {
++			sweet_hid_pen(tip, px, py, p, tilt_x, tilt_y);
++		} else {
++			sweet_hid_touch(9, tip, px, py);
++		}
++	}
++	gp.tip = tip;
++}
++
+ static void
+ gt_thread(void *arg, wait_result_t result)
+ {
+@@ -927,6 +1043,7 @@ gt_thread(void *arg, wait_result_t result)
+ 	printf("GTS4L TOUCH: mode %d flip %d, starting in %u s\n", gt_mode, gt_flip, delay_s);
+ 	tt_wait(delay_s * 1000u);
+ 	tt.ahb_vote = 1u << 15;
++	tt.addr = 0x49u;
+ 	tt.vote = ml_io_map(TT_GCC_VOTE_PA, 0x1000);
+ 	tt.ahb = ml_io_map(0x00125000u, 0x1000);
+ 	tt.gccqup = ml_io_map(0x00128000u, 0x1000);
+@@ -956,8 +1073,14 @@ gt_thread(void *arg, wait_result_t result)
+ 		goto out;
+ 	}
+ 	nanoseconds_to_absolutetime(NSEC_PER_SEC / 60, &tt_move_gap);
++	(void)PE_parse_boot_argn("gts4lpen", &gp.mode, sizeof(gp.mode));
++	(void)PE_parse_boot_argn("gts4lpenflip", &gp.flip, sizeof(gp.flip));
++	if (gp.mode > 0) {
++		gp_init();
++	}
+ 	unsigned errors = 0, ticks = 0;
+ 	for (;;) {
++		gp_poll();
+ 		if (!tt_in(G_ATTN) || (++ticks % 20u) == 0) {
+ 			int err = gt_poll();
+ 			if (err) {
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index fef7d62..90e3cf5 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -1061,6 +1061,20 @@ AppleCLCD::setPower(bool on)
+ 		IOLockUnlock(fLock);
+ 	}
+ 	sweet_fbcon_blank(!on);
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++	/*
++	 * gts4lrot (Galaxy Tab S4): no kickoff, so sweet_fbcon_blank does nothing and the panel kept the last frame.
++	 * It refreshes from this memory by itself, so black memory is a dark AMOLED (the panel itself stays on).
++	 */
++	int gts4l_rot = 0;
++	if (!on && fPixels != 0 && PE_parse_boot_argn("gts4lrot", &gts4l_rot, sizeof(gts4l_rot)) && gts4l_rot != 0) {
++		volatile uint64_t *px = (volatile uint64_t *)fPixels;
++		for (size_t i = 0; i < (size_t)fRowBytes * fHeight / 8; i++) {
++			px[i] = 0xff000000ff000000ULL;
++		}
++		__asm__ volatile("dsb sy" ::: "memory");
++	}
++#endif
+ 	if (on && fDirty) {
+ 		presentPending();
+ 	}
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 0ff4bd3..6842daa 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -391,6 +391,7 @@ class SweetHIDTouch : public IOHIDEventService {
+ public:
+ 	virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void touch(int finger, bool down, int x, int y);
++	void pen(bool down, int x, int y, int pressure, int tilt_x, int tilt_y);
+ protected:
+ 	virtual UInt32 getPrimaryUsagePage() APPLE_KEXT_OVERRIDE { return kHIDPage_Digitizer; }
+ 	virtual UInt32 getPrimaryUsage() APPLE_KEXT_OVERRIDE { return kHIDUsage_Dig_TouchScreen; }
+@@ -2047,6 +2048,36 @@ SweetHIDTouch::start(IOService *provider)
+ 	return true;
+ }
+ 
++/*
++ * gts4lpen=2 (Galaxy Tab S4's S Pen): one stylus event with pressure and tilt, x and y as touch() takes them. Whether
++ * UIKit on the iPhone X build makes a pencil UITouch of it is what this tests; gts4lpen=1 uses touch() as a finger.
++ */
++void
++SweetHIDTouch::pen(bool down, int x, int y, int pressure, int tilt_x, int tilt_y)
++{
++	static bool was;
++	int lx = x + fOffX, ly = y + fOffY;
++	lx = lx < 0 ? 0 : (lx > fLogicalW - 1 ? fLogicalW - 1 : lx);
++	ly = ly < 0 ? 0 : (ly > fLogicalH - 1 ? fLogicalH - 1 : ly);
++	IOFixed nx = (IOFixed)(((int64_t)lx << 16) / fLogicalW), ny = (IOFixed)(((int64_t)ly << 16) / fLogicalH);
++	IOHIDEvent *e = IOHIDEvent::digitizerEvent(mach_absolute_time(), 1, kIOHIDDigitizerTransducerTypeStylus, down, down ? 1 : 0, nx, ny);
++	if (e == NULL) {
++		return;
++	}
++	UInt32 mask = kIOHIDDigitizerEventPosition;
++	if (was != down) {
++		mask |= kIOHIDDigitizerEventTouch | kIOHIDDigitizerEventRange;
++	}
++	e->setIntegerValue(kIOHIDEventFieldDigitizerTouch, down);
++	e->setIntegerValue(kIOHIDEventFieldDigitizerEventMask, mask);
++	e->setFixedValue(kIOHIDEventFieldDigitizerPressure, down ? (IOFixed)(((int64_t)pressure << 16) / 4095) : 0);
++	e->setFixedValue(kIOHIDEventFieldDigitizerTiltX, (IOFixed)(tilt_x << 16));
++	e->setFixedValue(kIOHIDEventFieldDigitizerTiltY, (IOFixed)(tilt_y << 16));
++	was = down;
++	dispatchEvent(e);
++	e->release();
++}
++
+ void
+ SweetHIDTouch::touch(int finger, bool down, int x, int y)
+ {
+@@ -2286,3 +2317,12 @@ sweet_hid_touch(int finger, int down, int x, int y)
+ 		gSweetTouch->touch(finger, down != 0, x, y);
+ 	}
+ }
++
++extern "C" void sweet_hid_pen(int down, int x, int y, int pressure, int tilt_x, int tilt_y);
++void
++sweet_hid_pen(int down, int x, int y, int pressure, int tilt_x, int tilt_y)
++{
++	if (gSweetTouch) {
++		gSweetTouch->pen(down != 0, x, y, pressure, tilt_x, tilt_y);
++	}
++}
