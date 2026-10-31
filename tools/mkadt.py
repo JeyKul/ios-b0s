@@ -347,6 +347,10 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
         # cannot draw into: the dock / App Library backgrounds stayed white.
         product_props = [(k, cstr('sRGB') if k in ('artwork-display-gamut', 'display-gamut') else v)
                          for k, v in product_props]
+    # The IPSW's J71b tree has artwork-device-subtype 0 (iBoot's to fill; D22's has 2436). MobileGestalt's
+    # ArtworkDeviceSubType then names no iPad, and SpringBoard's and UIKit's layouts overlap.
+    if GTS4L_IPAD and product_props:
+        product_props = [(k, u32(GTS4L_CANVAS[1]) if k == 'artwork-device-subtype' else v) for k, v in product_props]
     # /product/haptics (closed-loop 1, supports-3rd-party-haptics 1): without it iOS plays nothing on
     # the plug-in's "Actuator" device (boot 162: a Haptic Touch menu, no samples), as HackiOS found.
     # taimen only: its DRV2624 is behind /dev/redwood-haptic (xnu 0328). TAIMEN_HAPTICS=0 leaves it out.
