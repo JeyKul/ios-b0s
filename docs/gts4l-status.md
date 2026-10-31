@@ -40,3 +40,5 @@ Gold at 1728 MHz (gts4lgold=1 taimengold=1728 taimenamp=1): every step's self-te
 Apps: the 32 stock apps installed from `mkrootfix --apps-archive` on the `cache` partition (`--apps-part cache`), with the LaunchServices database removed once. They appear on the home screen; later boots must not remove the database again.
 
 USB: patches 0363-0364 (QUSB2 rails, clamp, init sequence, reset) with the UTMI switch: the core runs, link state goes to suspend, the host sees nothing. taimen connected at high speed with the USB3 PHY running (boot 133), so 0365 adds gts4lusbss=1 to reset and start the USB3 PHY as Samsung's driver does.
+
+USB networking works (0366): redriver set up as TWRP does, USB3 lane from GPIO 38. Boot args `sweetusb=2 gts4lusbss=1` (no gts4lusbutmi or sweetusbss). The PC sees "Sweet iOS (USB Ethernet)" through cdc_ncm at 5000M, tablet at 192.168.7.2, ping about 1 ms. lockdownd's port 62078 answers.
