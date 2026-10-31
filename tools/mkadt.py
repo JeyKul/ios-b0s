@@ -68,7 +68,9 @@ TAIMEN = dict(
 if '--gts4l' in sys.argv:
     TAIMEN.update(fb_w=2560, fb_h=1600, fb_kickoff=None)
 # GTS4L_IPAD=1: the userland is the iPad 6 (iPad7,5 / J71bAP) IPSW; research/ipsw-x/j71bap.adt extracted as d22ap.adt.
-GTS4L_IPAD = '--gts4l' in sys.argv and os.environ.get('GTS4L_IPAD') == '1'
+GTS4L_IPAD = '--gts4l' in sys.argv and os.environ.get('GTS4L_IPAD') in ('1', '2')
+# GTS4L_IPAD=2: the panel's own 1600x2560 instead of the iPad's 1536x2048, for gts4lipad=2
+GTS4L_CANVAS = (1600, 2560) if os.environ.get('GTS4L_IPAD') == '2' else (1536, 2048)
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -282,8 +284,8 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(1536 if GTS4L_IPAD else 750 if pixel1 else 1125)),
-            ('canvas-height', u32(2048 if GTS4L_IPAD else 1334 if pixel1 else 2436)),
+            ('canvas-width', u32(GTS4L_CANVAS[0] if GTS4L_IPAD else 750 if pixel1 else 1125)),
+            ('canvas-height', u32(GTS4L_CANVAS[1] if GTS4L_IPAD else 1334 if pixel1 else 2436)),
         ])] + ([
         # Wi-Fi (bsd/dev/sailfish_wlan.c, QCA6174 on PCIe): launchd starts
         # wifid only if the tree has a node named wlan; SailfishWLAN (the
