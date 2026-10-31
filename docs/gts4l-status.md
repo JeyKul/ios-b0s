@@ -44,3 +44,7 @@ USB: patches 0363-0364 (QUSB2 rails, clamp, init sequence, reset) with the UTMI 
 USB networking works (0366): redriver set up as TWRP does, USB3 lane from GPIO 38. Boot args `sweetusb=2 gts4lusbss=1` (no gts4lusbutmi or sweetusbss). The PC sees "Sweet iOS (USB Ethernet)" through cdc_ncm at 5000M, tablet at 192.168.7.2, ping about 1 ms. lockdownd's port 62078 answers.
 
 S Pen (0367): gts4lpen=1 works as a finger; needs gts4lpenflip=2 (top and bottom were mirrored). Screen off works: black memory on an AMOLED when iOS sleeps the display. Fingers unaffected.
+
+iPadOS 16.6.1 (iPad 6, 20G81) boots to the home screen: GTS4L_IPAD=1, gts4lipad=1, gts4lrot=3, mkrootfix --ipad. sweetgl's QuartzCore patches install (dsc-ipad6), mtltest passes, migration runs once after fairplayd.A2 is removed. gts4lipad=2 (1600x2560) also boots.
+
+Open: home screen widgets and icons overlap at both resolutions. The dock is correct. artwork-device-subtype 2048 did not fix it; next, read the MobileGestalt cache and IconState from a copy of the partition. Built-in apps are not yet installed on iPadOS. The iPhone stylus test did nothing; retry gts4lpen=2 on iPadOS. Brightness, audio, sensors and Wi-Fi are not started.
