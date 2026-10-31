@@ -1,0 +1,122 @@
+diff --git a/bsd/dev/taimen_touch.c b/bsd/dev/taimen_touch.c
+index 4860767..28ac819 100644
+--- a/bsd/dev/taimen_touch.c
++++ b/bsd/dev/taimen_touch.c
+@@ -797,7 +797,7 @@ out:
+  */
+ #define GT_READ_ONE     0x60u
+ #define GT_TOUCHTYPES   (0x01u | 0x20u | 0x40u)     /* touch, palm, wet: Samsung's default */
+-static int gt_mode, gt_flip;
++static int gt_mode, gt_flip, gt_ipad;
+ 
+ static bool
+ gt_wait_ready(void)
+@@ -886,8 +886,8 @@ gt_event(const uint8_t *e, uint32_t *mask, int *x, int *y)
+ 		tx = (gt_flip & 1) ? 1599 - tx : tx;
+ 		ty = (gt_flip & 2) ? 2559 - ty : ty;
+ 		*mask |= 1u << id;
+-		x[id] = tx - (1600 - 1125) / 2 + 157;
+-		y[id] = ty - (2560 - 2436) / 2 + 222;
++		x[id] = gt_ipad ? tx - (1600 - 1536) / 2 : tx - (1600 - 1125) / 2 + 157;
++		y[id] = gt_ipad ? ty - (2560 - 2048) / 2 : ty - (2560 - 2436) / 2 + 222;
+ 	}
+ }
+ 
+@@ -1016,7 +1016,8 @@ gp_poll(void)
+ 	int tx = y * 1599 / GP_MAX_Y, ty = x * 2559 / GP_MAX_X;
+ 	tx = (gp.flip & 1) ? 1599 - tx : tx;
+ 	ty = (gp.flip & 2) ? 2559 - ty : ty;
+-	int px = tx - (1600 - 1125) / 2 + 157, py = ty - (2560 - 2436) / 2 + 222;
++	int px = gt_ipad ? tx - (1600 - 1536) / 2 : tx - (1600 - 1125) / 2 + 157;
++	int py = gt_ipad ? ty - (2560 - 2048) / 2 : ty - (2560 - 2436) / 2 + 222;
+ 	if (tip != gp.tip && logged < 80) {
+ 		logged++;
+ 		printf("GTS4L PEN: %s raw %02x x %d y %d -> %d,%d pressure %d tilt %d,%d\n", tip ? "down" : "up", d[0], x, y, tx, ty, p, tilt_x, tilt_y);
+@@ -1040,6 +1041,7 @@ gt_thread(void *arg, wait_result_t result)
+ 	(void)arg;
+ 	(void)result;
+ 	(void)PE_parse_boot_argn("gts4lflip", &gt_flip, sizeof(gt_flip));
++	(void)PE_parse_boot_argn("gts4lipad", &gt_ipad, sizeof(gt_ipad));
+ 	printf("GTS4L TOUCH: mode %d flip %d, starting in %u s\n", gt_mode, gt_flip, delay_s);
+ 	tt_wait(delay_s * 1000u);
+ 	tt.ahb_vote = 1u << 15;
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 90e3cf5..9db668c 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -77,6 +77,7 @@ enum {
+  */
+ static uint32_t sweet_fb_vsync_us = 16667;
+ #define SWEET_FB_DOT_PITCH              458     /* ppi, as the iPhone X panel */
++static uint32_t sweet_fb_ppi = SWEET_FB_DOT_PITCH;
+ /*
+  * The iOS userland only has status bar / layout data for real iPhone
+  * screens (UIKit: "No status bar visual provider for screen", the red
+@@ -521,6 +522,15 @@ AppleCLCD::start(IOService *provider)
+ 		fLogicalW = SWEET_FB_LOGICAL_W;
+ 		fLogicalH = SWEET_FB_LOGICAL_H;
+ 	}
++#endif
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++	/* gts4lipad=1: iPadOS on the Galaxy Tab S4, presented as the iPad 6's 1536x2048 portrait panel (with gts4lrot) */
++	int gts4l_ipad = 0;
++	if (PE_parse_boot_argn("gts4lipad", &gts4l_ipad, sizeof(gts4l_ipad)) && gts4l_ipad != 0) {
++		fLogicalW = 1536;
++		fLogicalH = 2048;
++		sweet_fb_ppi = 264;
++	}
+ #endif
+ 	fOffX = (int32_t)(fLogicalW - fWidth) / 2;
+ 	fOffY = (int32_t)(fLogicalH - fHeight) / 2;
+@@ -1705,7 +1715,7 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 		outCount = 1;
+ 		break;
+ 	case kSweetFBGetDotPitch:
+-		out[0] = fFB->fScaled ? SWEET_FB_P1_DOT_PITCH : SWEET_FB_DOT_PITCH;
++		out[0] = fFB->fScaled ? SWEET_FB_P1_DOT_PITCH : sweet_fb_ppi;
+ 		outCount = 1;
+ 		break;
+ 	case kSweetFBNotifications:
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 6842daa..6fea46a 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -399,6 +399,7 @@ protected:
+ private:
+ 	IOLock *fLock;
+ 	int fLogicalW, fLogicalH, fOffX, fOffY;
++	bool fCanvasInput;
+ 	bool fDown[SWEET_TOUCH_FINGERS];
+ 	bool fEdge[SWEET_TOUCH_FINGERS];
+ 	IOFixed fX[SWEET_TOUCH_FINGERS];
+@@ -2032,6 +2033,17 @@ SweetHIDTouch::start(IOService *provider)
+ 	setProperty("DisplayIntegrated", kOSBooleanTrue);
+ 	setProperty("SurfaceWidth", (unsigned long long)(53 << 16), 32);	/* mm, 16.16 */
+ 	setProperty("SurfaceHeight", (unsigned long long)(115 << 16), 32);
++	/* gts4lipad=1: the iPad 6's 1536x2048; the touch driver then sends canvas pixels, no border offsets */
++	int ipad = 0;
++	if (PE_parse_boot_argn("gts4lipad", &ipad, sizeof(ipad)) && ipad != 0) {
++		fLogicalW = 1536;
++		fLogicalH = 2048;
++		fOffX = 0;
++		fOffY = 0;
++		fCanvasInput = true;
++		setProperty("SurfaceWidth", (unsigned long long)(148 << 16), 32);
++		setProperty("SurfaceHeight", (unsigned long long)(197 << 16), 32);
++	}
+ #else
+ 	fLogicalW = SWEET_TOUCH_PANEL_W;
+ 	fLogicalH = SWEET_TOUCH_PANEL_H;
+@@ -2088,8 +2100,10 @@ SweetHIDTouch::touch(int finger, bool down, int x, int y)
+ 	if (finger < 0 || finger >= SWEET_TOUCH_FINGERS) {
+ 		return;
+ 	}
+-	x = x < 0 ? 0 : (x > SWEET_TOUCH_PANEL_W - 1 ? SWEET_TOUCH_PANEL_W - 1 : x);
+-	y = y < 0 ? 0 : (y > SWEET_TOUCH_PANEL_H - 1 ? SWEET_TOUCH_PANEL_H - 1 : y);
++	if (!fCanvasInput) {
++		x = x < 0 ? 0 : (x > SWEET_TOUCH_PANEL_W - 1 ? SWEET_TOUCH_PANEL_W - 1 : x);
++		y = y < 0 ? 0 : (y > SWEET_TOUCH_PANEL_H - 1 ? SWEET_TOUCH_PANEL_H - 1 : y);
++	}
+ 
+ 	IOLockLock(fLock);
+ 	bool was = fDown[finger];

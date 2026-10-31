@@ -207,7 +207,11 @@ def main():
                          '/usr/standalone/firmware/taimen-sensors, where xnu 0336 reads them')
     ap.add_argument('--daemon', action='append', default=[], metavar='LABEL=/PATH[,ARG...]',
                     help='add a launchd job of ours (RunAtLoad, KeepAlive, output to the console)')
+    ap.add_argument('--ipad', action='store_true', help='iPadOS 16.6.1 (20G81) root: its build, only MediaToolbox/Default')
     a = ap.parse_args()
+    global BUILD
+    if a.ipad:
+        BUILD = '20G81'
     if a.phone_tools:
         # netsvcd under its content hash: a new build gets a new path (ROOTFIX only creates absent
         # files, and the old binary may be running), and launchd's job follows the path
@@ -275,7 +279,7 @@ def main():
         pre, suf = pat.split('*', 1)
         b.add(FINDRM, d, pre.encode() + b'\0' + suf.encode() + b'\0', int(depth), 0, 0)
     srv = ['System/Library/Frameworks/MediaToolbox.framework/%s/SubServerConfiguration.plist' % d
-           for d in ('D22', 'D221', 'Default')]
+           for d in (('Default',) if a.ipad else ('D22', 'D221', 'Default'))]
     with tempfile.TemporaryDirectory() as tmp:
         orig = extract(a.image, ['System/Library/xpc/launchd.plist'] + srv, tmp)
 
