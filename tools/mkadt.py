@@ -67,6 +67,8 @@ TAIMEN = dict(
 # PP0 autorefresh on and a CTL0 START freezes the panel, so no kickoff-reg: the console only draws.
 if '--gts4l' in sys.argv:
     TAIMEN.update(fb_w=2560, fb_h=1600, fb_kickoff=None)
+# GTS4L_IPAD=1: the userland is the iPad 6 (iPad7,5 / J71bAP) IPSW; research/ipsw-x/j71bap.adt extracted as d22ap.adt.
+GTS4L_IPAD = '--gts4l' in sys.argv and os.environ.get('GTS4L_IPAD') == '1'
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -76,7 +78,8 @@ BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 # an Apple artifact (kept out of git): extract it from the IPSW with
 #   tools/remotezip.py URL DeviceTree.d22ap.im4p DIR
 #   ipsw img4 im4p extract DIR/Firmware/all_flash/DeviceTree.d22ap.im4p -o d22ap.adt
-D22AP_ADT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/d22ap.adt')
+D22AP_ADT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/j71bap.adt' if GTS4L_IPAD else
+                         '../research/ipsw-x/d22ap.adt')
 # Pixel 1: iPhone 8 (iPhone10,1 / D20AP) userland, iPhone_4.7_P3 IPSW, same way:
 #   tools/remotezip.py URL DeviceTree.d20ap DIR; tools/adt.py unwrap DIR/.../DeviceTree.d20ap.im4p d20ap.adt
 D20AP_ADT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-8/d20ap.adt')
@@ -279,8 +282,8 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(750 if pixel1 else 1125)),
-            ('canvas-height', u32(1334 if pixel1 else 2436)),
+            ('canvas-width', u32(1536 if GTS4L_IPAD else 750 if pixel1 else 1125)),
+            ('canvas-height', u32(2048 if GTS4L_IPAD else 1334 if pixel1 else 2436)),
         ])] + ([
         # Wi-Fi (bsd/dev/sailfish_wlan.c, QCA6174 on PCIe): launchd starts
         # wifid only if the tree has a node named wlan; SailfishWLAN (the
@@ -328,7 +331,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
     buttons = node('buttons', [
         ph(),
         ('button-names', cstr('volup') + cstr('voldown') + cstr('hold')),
-        ('home-button-type', u32(1 if pixel1 else 2)),  # iPhone 8: Home button
+        ('home-button-type', u32(1 if pixel1 or GTS4L_IPAD else 2)),  # iPhone 8: Home button
         ('opposed-power-vol-buttons', u32(1)),
     ])
 
@@ -347,7 +350,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
     # taimen only: its DRV2624 is behind /dev/redwood-haptic (xnu 0328). TAIMEN_HAPTICS=0 leaves it out.
     product_children = []
     if taimen and os.environ.get('TAIMEN_HAPTICS', '1') != '0':
-        haptics = d22ap_product_child('haptics')
+        haptics = None if GTS4L_IPAD else d22ap_product_child('haptics')
         if haptics:
             product_children.append(node('haptics', [ph()] + haptics))
     product = [node('product', [ph()] + product_props, product_children)] if product_props else []
@@ -357,6 +360,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
     # (iPhone10,3). 'xiaomi,sweet' stays for SweetPlatformExpert matching.
     # Pixel 1 keeps 'xiaomi,sweet' for the same kernel matching (one platform expert).
     ident = (('D20AP', 'iPhone10,1', 'D20', 'google,sailfish', 'qcom,msm8996') if pixel1 else
+             ('J71bAP', 'iPad7,5', 'J71b', 'xiaomi,sweet', 'qcom,sm7150') if GTS4L_IPAD else
              ('D22AP', 'iPhone10,3', 'D22', 'xiaomi,sweet', 'qcom,sm7150'))
     compat = cstr(ident[0]) + cstr(ident[1]) + cstr('xiaomi,sweet')
     if pixel1:
@@ -373,7 +377,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
         # iBoot fills the root's platform-name (zeros in the IPSW's tree); MobileGestalt's
         # HardwarePlatform reads it (boot 182: CoreVideo "Failed to read HardwarePlatform, MG query
         # returned NULL" in PosterBoard). The A11 of both D20 and D22.
-        ('platform-name', cstr('t8015')),
+        ('platform-name', cstr('t8010' if GTS4L_IPAD else 't8015')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
     ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([] if qemu else [ufs]))
