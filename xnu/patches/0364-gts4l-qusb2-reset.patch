@@ -1,0 +1,21 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+index 95d050f..e3d6141 100644
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -1729,6 +1729,16 @@ gts4l_qusb_init(void)
+ 		return;
+ 	}
+ 	phy_wr(tcsr, 0x24c, 1);
++	/* qusb_phy_init's reset: GCC_QUSB2PHY_PRIM_BCR, clearing whatever state S-Boot left (e.g. clock bypass) */
++	vm_offset_t bcr = ml_io_map(GCC_PA + 0x12000, 0x1000);
++	printf("GTS4L USB: before reset: ANALOG_ONE 0x%02x TWO 0x%02x INTR_CTRL 0x%02x INTR_STAT 0x%02x\n", usb_rd(hs, 0x0) & 0xff,
++	    usb_rd(hs, 0x4) & 0xff, usb_rd(hs, 0x22c) & 0xff, usb_rd(hs, 0x230) & 0xff);
++	if (bcr != 0) {
++		phy_wr(bcr, 0, 1);
++		delay(150);
++		phy_wr(bcr, 0, 0);
++		delay(150);
++	}
+ 	phy_wr(hs, QUSB2_PWR_CTRL1, (usb_rd(hs, QUSB2_PWR_CTRL1) & 0xff) | 1u);
+ 	for (unsigned i = 0; i < sizeof(seq) / sizeof(seq[0]); i++) {
+ 		phy_wr(hs, seq[i][1], seq[i][0]);

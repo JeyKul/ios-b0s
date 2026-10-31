@@ -71,7 +71,8 @@ def apps_archive(img, out):
         # 7-Zip exits 2 on one "Data Error" (MobileCal's FacetimeExtension Localizable.loctable, a
         # 4 KB bplist in 64 KB of extents): the file comes out whole and parses, so warn and go on
         r = subprocess.run([SEVENZIP, 'x', '-y', '-o' + winpath(tmp), winpath(img),
-                            'iOSRoot\\' + STAGED.replace('/', '\\') + '\\*', '-r'], capture_output=True)
+                            ('iOSRoot\\' + STAGED.replace('/', '\\') + '\\*') if WSL else f'iOSRoot/{STAGED}/*', '-r'],
+                           capture_output=True)
         if r.returncode not in (0, 2):
             sys.exit(f'7-Zip failed ({r.returncode}): ' + r.stdout.decode('utf-8', 'replace')[-500:])
         for line in r.stdout.decode('utf-8', 'replace').splitlines():
