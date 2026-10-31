@@ -1,0 +1,49 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+index e3d6141..bde76e6 100644
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -1705,6 +1705,9 @@ ud_phys_on(void)
+ 
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+ extern bool sweet_rpm_ldoa_set(unsigned ldo, uint32_t uv, uint32_t set);
++#define GTS4L_USB3_BCR_PAGE       0x50000u
++#define GTS4L_USB3_PHY_BCR_OFF    0x20u
++#define GTS4L_USB3PHY_PHY_BCR_OFF 0x24u
+ 
+ /*
+  * gts4lusbutmi=1 (Galaxy Tab S4): S-Boot leaves the QUSB2 PHY powered down. Clearing POWER_DOWN alone gave a
+@@ -1772,11 +1775,32 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	ud.dma_pa = ptoa_64(pn);
+ 	ud_if_create();
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+-	int gts4l_phy = 0;
++	int gts4l_phy = 0, gts4l_ss = 0;
+ 	PE_parse_boot_argn("gts4lusbutmi", &gts4l_phy, sizeof(gts4l_phy));
+-	if (gts4l_phy) {
++	PE_parse_boot_argn("gts4lusbss", &gts4l_ss, sizeof(gts4l_ss));
++	if (gts4l_phy || gts4l_ss) {
+ 		gts4l_qusb_init();
+ 	}
++	if (gts4l_ss) {
++		/*
++		 * gts4lusbss=1: the USB3 PHY up as msm_ssphy_qmp_reset + _init do, so the core has a PIPE clock and can
++		 * fall back to high speed by itself as on taimen (boot 133): vls clamp off, phymode USB, both resets.
++		 */
++		vm_offset_t tc = ml_io_map(0x01fcb000, 0x1000), bc = ml_io_map(GCC_PA + GTS4L_USB3_BCR_PAGE, 0x1000);
++		if (tc != 0 && bc != 0) {
++			phy_wr(tc, 0x244, 0);   /* 1 clamps the level shifter for autonomous mode (msm_ssusb_enable_autonomous) */
++			phy_wr(bc, GTS4L_USB3PHY_PHY_BCR_OFF, 1);
++			delay(10);
++			phy_wr(bc, GTS4L_USB3_PHY_BCR_OFF, 1);
++			delay(10);
++			phy_wr(tc, 0x248, 0);
++			phy_wr(bc, GTS4L_USB3_PHY_BCR_OFF, 0);
++			delay(10);
++			phy_wr(bc, GTS4L_USB3PHY_PHY_BCR_OFF, 0);
++			delay(10);
++			printf("GTS4L USB: USB3 PHY reset, clamp 0x%x phymode 0x%x\n", usb_rd(tc, 0x244), usb_rd(tc, 0x248));
++		}
++	}
+ 	ud_phys_on();
+ 	/*
+ 	 * gts4lusbutmi=1 (Galaxy Tab S4): S-Boot leaves the USB3 PHY in reset and it does not restart here, so

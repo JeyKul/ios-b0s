@@ -36,3 +36,7 @@ USB: S-Boot leaves the DWC3 powered and clocked with the USB3 PHY in reset. swee
 Gold: S-Boot leaves gold on its PLL at 1132.8 MHz (GFMUX cfg 0x300). Patch 0361 adds gts4lgold=1. The chip's open-loop fuses differ from the Pixel's, so `taimenosm` refuses and its tables must not be reused.
 
 Gold at 1728 MHz (gts4lgold=1 taimengold=1728 taimenamp=1): every step's self-test passed on cpu4-7, no panic in the first short run, hottest sensor 58.7 C.
+
+Apps: the 32 stock apps installed from `mkrootfix --apps-archive` on the `cache` partition (`--apps-part cache`), with the LaunchServices database removed once. They appear on the home screen; later boots must not remove the database again.
+
+USB: patches 0363-0364 (QUSB2 rails, clamp, init sequence, reset) with the UTMI switch: the core runs, link state goes to suspend, the host sees nothing. taimen connected at high speed with the USB3 PHY running (boot 133), so 0365 adds gts4lusbss=1 to reset and start the USB3 PHY as Samsung's driver does.
