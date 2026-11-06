@@ -35,3 +35,13 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 - Userland candidate: iPhone 11 Pro Max (A13, ARMv8.4, 1242x2688): oldest arm64e device on iOS 26, no SME.
 - Work: port the 4K-page and platform patches from xnu-8796 to 12377; generic ARMv8.3 PAC in place of Apple's
   key registers; APFS/cryptex root for 26; Metal on Xclipse before CoreAnimation draws Liquid Glass.
+
+## Stage 1 result (boot 1, 2026-11-06): runs, 1440-wide fb correct
+- S-Boot enters at **EL1**, MMU off, image at 0x80090000, DTB 0xa0000000. Boot CPU: MIDR 0x410fd462 (A510 r0p2),
+  MPIDR 0x81000000 (MT=1, core in Aff1).
+- MMFR0 0x0000022200101122: PARange 40 bit, ASID 16, **4K, 16K and 64K granules** (Apple-native 16K pages possible).
+- ISAR1 0x0010111101211052: APA=5 (QARMA PAC, FPACCOMBINE), GPA=1, LRCPC2, I8MM, BF16, SB, SPECRES.
+- SCTLR_EL1 0x30d8199a. **CNTFRQ_EL0 reads 26 MHz (0x18cba80)**; the DT forces 25.6 MHz. To be measured.
+- initrd 0x85100000-0x8644c164 = vendor ramdisk (0x134ba9d) + boot ramdisk (unaligned, at 0x8644ba9d) + bootconfig.
+  The stage 2 loader must find the payload by magic and copy it aligned.
+- WTCON 0x1b7390 -> 0x1b7180 after kill_dog. DECON 0x30 reads 0x10010 after the 0x1281 write; fb writes show anyway.
