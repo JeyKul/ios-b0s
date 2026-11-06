@@ -29,11 +29,20 @@
 #endif
 #define FB_STRIDE	(FB_W * FB_BPP)
 
+#ifdef B0S
+/* OLED: dim text on black, the lit pixels change with every boot's values */
+#define RED	0xff600000U
+#define BLUE	0xff000000U
+#define WHITE	0xff707070U
+#define YELLOW	0xff605000U
+#define GREEN	0xff006000U
+#else
 #define RED	0xffff0000U
 #define BLUE	0xff0000a0U
 #define WHITE	0xffffffffU
 #define YELLOW	0xffffff00U
 #define GREEN	0xff00ff00U
+#endif
 
 extern volatile uint32_t *con_fb;
 
