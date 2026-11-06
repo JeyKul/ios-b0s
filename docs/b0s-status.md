@@ -5,6 +5,10 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 
 
 ## 2026-11-06 evening: ACPM / GPU (newest first; details in docs/b0s-gpu-handoff.md)
+- 0396 (boot 32): all 12 plugins attached. Names: 0 framework, 1 sci, 2 fvp, 3 tmu, 4 SPMI, 5 fullswpmu,
+  6 flexpmu, 7 GPADC, 8 DCXO, 9 plugin_DVFS, 10 DMC, 11 mfd. ch 5 (acpm_dvfs) is owned by 2 fvp; 9 DVFS owns ch 3.
+- Samsung send path (acpm_ipc.c): no TYPE_BUFFER case; ch 5 (q_len 1) only sends once APM's rx_rear word
+  (SRAM 0xF308) != 0. Android logs show no set_rate errors, so APM sets it there; we read 0. 0397 dumps 0xF2E0-0xF31F.
 - 0395 (boot 31): plugin table at SRAM 0x6DF0, 12 entries, stride 48 (not 32). Plugins 0-7 all attached
   (incl. plugin 2 = ch 5's owner), so "detached DVFS plugin" is unlikely. 0394 (pointer-chasing dump) froze.
 - 0393 (boot 29): channel table at SRAM 0x7030, ipc_ap_max 13, 72 B per channel. **ch 5 (DVFS) is TYPE_BUFFER,
