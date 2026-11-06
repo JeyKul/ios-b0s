@@ -28,3 +28,10 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
   No PSP. Same shape as the a540 zap shader on gts4l.
 - Userland: Mesa radeonsi/RADV for gfx10.3 (ACO), amdgpu winsys over a SweetGPU-style XNU service, replacing
   freedreno in sweetgl/sweetmtl.
+
+## Liquid Glass (iOS 26) target
+- CPU has PAC (paca/pacg) and BTI: arm64e userland possible, unlike gts4l. Parts 0xd46 A510 x4, 0xd47 A710 x3, 0xd48 X2.
+- Kernel source: xnu-12377.121.6 (iOS/macOS 26) is public; no iOS 27 source, so the 24A IPSW is out.
+- Userland candidate: iPhone 11 Pro Max (A13, ARMv8.4, 1242x2688): oldest arm64e device on iOS 26, no SME.
+- Work: port the 4K-page and platform patches from xnu-8796 to 12377; generic ARMv8.3 PAC in place of Apple's
+  key registers; APFS/cryptex root for 26; Metal on Xclipse before CoreAnimation draws Liquid Glass.

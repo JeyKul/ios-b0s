@@ -77,6 +77,7 @@ void shim_main(uint64_t dtb)
 	con_hex("MMFR1", rsr("id_aa64mmfr1_el1"));
 	con_hex("PFR0", rsr("id_aa64pfr0_el1"));
 	con_hex("ISAR0", rsr("id_aa64isar0_el1"));
+	con_hex("ISAR1", rsr("id_aa64isar1_el1"));	/* PAC: APA/API/GPA */
 	con_hex("SCTLR1", rsr("sctlr_el1"));
 	if (el == 2) {
 		con_hex("HCR", rsr("hcr_el2"));
