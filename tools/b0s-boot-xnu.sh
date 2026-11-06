@@ -20,5 +20,8 @@ cmdline=$(printf '%s\n' "$cmdline" | awk '{ for (i = NF; i >= 1; i--) { k = $i; 
 echo "boot-args: $cmdline"
 blobs=()
 [ -n "${ROOTFIX:-}" ] && blobs+=(--blob "ROOTFIX=$(realpath "$ROOTFIX")")
-python3 -I "$P/tools/mkpayload.py" "$kernel" "$out/b0s.adt" "$out/payload" --l2block 0x200000 --cmdline "$cmdline" "${blobs[@]}"
+# kernel.*.b0s (MACHINE_CONFIG B0S, xnu 0386) has 16 KiB pages: 32 MiB L2 blocks; TAIMEN 4 KiB: 2 MiB.
+l2=0x200000
+[[ $(basename "$kernel") == *.b0s ]] && l2=0x2000000
+python3 -I "$P/tools/mkpayload.py" "$kernel" "$out/b0s.adt" "$out/payload" --l2block $l2 --cmdline "$cmdline" "${blobs[@]}"
 EXTRA_CFLAGS="-DSTAGE2" OUT=b0s-xnu.img "$P/shim/build-b0s.sh" "$out/payload"
