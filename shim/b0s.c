@@ -2,7 +2,7 @@
  * Galaxy S22 Ultra (b0s, Exynos 2200 / s5e9925) shim, stage 1: read-only diagnostic
  * on the S-Boot framebuffer (s3cfb.bootloaderfb=0xf6200000). Writes only: framebuffer,
  * DECON HW_SW_TRIG_CONTROL (as uniLoader g0s, so fb writes reach the panel) and the
- * watchdog off. Stays up until a forced reset (Vol Down + Power for 7 s).
+ * watchdog off. Text for 90 s, then black (OLED). Forced reset: Vol Down + Power, 7 s.
  */
 #include <stdint.h>
 #include "console.h"
@@ -22,13 +22,41 @@
 static inline uint32_t rd32(uintptr_t a) { return *(volatile uint32_t *)a; }
 static inline void wr32(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; }
 
+/*
+ * OLED burn-in guard: the text stays SHOW_S seconds (time for a photo), then the
+ * screen goes black and only a 6x6 dot wanders across it, so no pixel stays lit.
+ */
+#define SHOW_S	90
+
+static void dot(int x, int y, uint32_t c)
+{
+	for (int j = 0; j < 6; j++)
+		for (int i = 0; i < 6; i++)
+			con_fb[(y + j) * FB_W + x + i] = c;
+}
+
+static void blank(void)
+{
+	for (uint32_t i = 0; i < FB_W * FB_H; i++)
+		con_fb[i] = 0xff000000U;
+}
+
 static void __attribute__((noreturn)) hang(void)
 {
-	for (uint64_t n = 0;; n++) {
+	uint64_t f = rsr("cntfrq_el0"), t0 = rsr("cntpct_el0");
+	for (uint64_t n = 0; rsr("cntpct_el0") - t0 < SHOW_S * f; n++) {
 		con_hex("BEAT", n);
 		con_up();
 		for (volatile uint32_t i = 0; i < 20000000; i++)
 			;
+	}
+	blank();
+	for (uint32_t n = 0;; n++) {
+		int x = (n * 37) % (FB_W - 6), y = (n * 101) % (FB_H - 6);
+		dot(x, y, 0xff303030U);
+		for (volatile uint32_t i = 0; i < 50000000; i++)
+			;
+		dot(x, y, 0xff000000U);
 	}
 }
 
@@ -53,7 +81,7 @@ static void kill_dog(void)
 /* Colour bars across the top: a wrong FB_W shows as slanted bars. */
 static void bars(void)
 {
-	static const uint32_t c[] = { RED, GREEN, 0xff0000ffU, WHITE };
+	static const uint32_t c[] = { RED, GREEN, 0xff000060U, WHITE };
 	for (int y = 0; y < 64; y++)
 		for (int x = 0; x < FB_W; x++)
 			con_fb[y * FB_W + x] = c[x * 4 / FB_W];
