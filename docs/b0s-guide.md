@@ -22,7 +22,8 @@ dated log: `docs/b0s-status.md`. GPU/ACPM detail: `docs/b0s-gpu-handoff.md`. Wor
 ```
 S-Boot (Samsung bootloader, unlocked) loads boot.img (v4) + stock vendor_boot
   -> the "kernel" in boot.img is our shim (shim/start.S + shim/b0s.c + shim/loader.c), entered at EL1, MMU off,
-     x0 = DTB. The real Samsung hypervisor sits at EL2 (PSCI via hvc).
+     x0 = DTB (stage 1 measured CurrentEL = 1). Samsung's hypervisor is already resident at EL2 (PSCI via hvc);
+     the shim and XNU both run at EL1 under it, nothing of ours runs at EL2.
   -> shim finds the "SWEETXNU" payload in the initrd (vendor ramdisk + our ramdisk + bootconfig, unaligned),
      copies it to 0xd0000000, loads the XNU Mach-O segments to the RAM base, places the Apple Device Tree (ADT)
      and boot_args, jumps.
