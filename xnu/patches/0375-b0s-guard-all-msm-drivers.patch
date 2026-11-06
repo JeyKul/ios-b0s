@@ -1,0 +1,294 @@
+--- a/bsd/dev/sailfish_wlan.c
++++ b/bsd/dev/sailfish_wlan.c
+@@ -42,6 +42,7 @@
+ #include <net/route.h>
+ #include <kern/locks.h>
+ #include <netinet/in.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
+@@ -3683,6 +3684,10 @@
+ void
+ sailfish_wlan_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int on = 0;
+ 	thread_t thread;
+ 	(void)PE_parse_boot_argn("sailfishwlan", &on, sizeof(on));
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -100,6 +100,7 @@
+ };
+ #include "sweet_gpu_shaders.h"
+ #include "sweet_gpu.h"
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern bool sweet_pmic_read(uint16_t ppid, uint8_t addr, uint8_t *out);
+@@ -2851,6 +2852,10 @@
+ void
+ sweet_gpu_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int on = 0;
+ 	thread_t thread;
+ 	if (!PE_parse_boot_argn("sweetgpu", &on, sizeof(on)) || on == 0) {
+--- a/bsd/dev/sweet_keys.c
++++ b/bsd/dev/sweet_keys.c
+@@ -20,6 +20,7 @@
+ #include <kern/locks.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern void sweet_hid_key(int key, int down);
+@@ -301,6 +302,10 @@
+ void
+ sweet_keys_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int enabled = 1;
+ 	thread_t thread;
+ 	if (keys_started) {
+--- a/bsd/dev/sweet_perf.c
++++ b/bsd/dev/sweet_perf.c
+@@ -50,6 +50,7 @@
+ #include <os/atomic_private.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern struct processor *cpu_to_processor(int cpu);
+ extern struct processor *thread_bind(struct processor *processor);
+@@ -1746,6 +1747,10 @@
+ void
+ sweet_perf_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int fastboot = 0, resetfb = 0;
+ 	/*
+ 	 * Boot-arg sweetresetfb=1: any later reset (panic, watchdog) enters
+--- a/bsd/dev/sweet_spmi.c
++++ b/bsd/dev/sweet_spmi.c
+@@ -11,6 +11,7 @@
+ #include <machine/machine_routines.h>
+ #include <IOKit/IOLocks.h>
+ #include "sweet_spmi.h"
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ 
+@@ -54,6 +55,10 @@
+ int
+ sweet_spmi_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return -1;
++	}
+ 	if (sp_attempted) {
+ 		return sp_ready ? 0 : -1;
+ 	}
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -28,6 +28,7 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ /* Mach MIG declaration is not included by BSD's exported thread.h. */
+@@ -621,6 +622,10 @@
+ void
+ sweet_touch_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int enabled = 1;
+ 	thread_t thread;
+ 	if (st.started) {
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -41,6 +41,7 @@
+ #include <net/kpi_protocol.h>
+ #include <netinet/in.h>
+ #include <netinet/tcp.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ void sweet_usb_probe(void);
+@@ -101,6 +102,10 @@
+ void
+ sweet_usb_probe(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+ 	int enabled = 2;        /* 0314: USB networking by default (boots 134-148) */
+ #else
+--- a/bsd/dev/taimen_haptic.c
++++ b/bsd/dev/taimen_haptic.c
+@@ -45,6 +45,7 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern kern_return_t thread_terminate(thread_t);
+@@ -601,6 +602,10 @@
+ void
+ taimen_haptic_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	thread_t thread;
+ 	if (hap_started) {
+ 		return;
+--- a/bsd/dev/taimen_touch.c
++++ b/bsd/dev/taimen_touch.c
+@@ -24,6 +24,7 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++extern int sweet_is_b0s(void);        /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern kern_return_t thread_terminate(thread_t);
+@@ -1113,6 +1114,10 @@
+ void
+ taimen_touch_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int enabled = 1;
+ 	thread_t thread;
+ 	if (tt.started) {
+--- a/iokit/Kernel/arm/SailfishWLAN.cpp
++++ b/iokit/Kernel/arm/SailfishWLAN.cpp
+@@ -28,6 +28,7 @@
+ #include <sys/proc.h>
+ extern "C" {
+ #include <sys/kern_event.h>
++extern "C" int sweet_is_b0s(void);    /* SweetPlatformExpert.cpp, xnu 0370 */
+ }
+ 
+ /* Apple80211 events (IO80211.framework listens on KEV_VENDOR_APPLE / class 6 / subclass 1). */
+@@ -124,6 +125,10 @@
+ bool
+ SailfishWLAN::start(IOService *provider)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return false;
++	}
+ 	int on = 0;
+ 	if (!PE_parse_boot_argn("sailfishwlan", &on, sizeof(on)) || !on) {
+ 		return false;
+--- a/iokit/Kernel/arm/SweetBattery.cpp
++++ b/iokit/Kernel/arm/SweetBattery.cpp
+@@ -36,6 +36,7 @@
+ #include <IOKit/pwr_mgt/IOPMPowerSource.h>
+ #include <libkern/c++/OSCollectionIterator.h>
+ #include <pexpert/pexpert.h>
++extern "C" int sweet_is_b0s(void);    /* SweetPlatformExpert.cpp, xnu 0370 */
+ /* bsd/dev/sweet_keys.c */
+ extern "C" bool sweet_pmic_read(uint16_t ppid, uint8_t addr, uint8_t *out);
+ extern "C" bool sweet_pmic_write(uint16_t ppid, uint8_t addr, uint8_t val);
+@@ -371,6 +372,10 @@
+ bool
+ SweetBattery::start(IOService *provider)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return false;
++	}
+ 	if (!IOPMPowerSource::start(provider)) {
+ 		return false;
+ 	}
+--- a/iokit/Kernel/arm/TaimenAudio.cpp
++++ b/iokit/Kernel/arm/TaimenAudio.cpp
+@@ -92,6 +92,7 @@
+ #include <sys/uio.h>
+ #include <sys/ioccom.h>
+ #include <miscfs/devfs/devfs.h>
++extern "C" int sweet_is_b0s(void);    /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ extern "C" vm_map_address_t phystokv(uint64_t pa);
+@@ -3852,6 +3853,10 @@
+ void
+ taimen_audio_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	/*
+ 	 * 0326: sound by default (boot 159 played iOS's audio through the speakers); without the
+ 	 * ADSP-* payload blobs stage 1 says so and the thread ends. taimenaudio=0 turns it off.
+--- a/iokit/Kernel/arm/TaimenModem.cpp
++++ b/iokit/Kernel/arm/TaimenModem.cpp
+@@ -43,6 +43,7 @@
+ #include <pexpert/device_tree.h>
+ #include <sys/errno.h>
+ #include <sys/param.h>
++extern "C" int sweet_is_b0s(void);    /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ extern "C" vm_map_address_t phystokv(uint64_t pa);
+@@ -4826,6 +4827,10 @@
+ void
+ taimen_modem_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int level = 0;
+ 	thread_t t;
+ 	(void)PE_parse_boot_argn("taimenwifi", &level, sizeof(level));
+--- a/iokit/Kernel/arm/TaimenSensors.cpp
++++ b/iokit/Kernel/arm/TaimenSensors.cpp
+@@ -83,6 +83,7 @@
+ #include <pexpert/pexpert.h>
+ #include <sys/errno.h>
+ #include <sys/param.h>
++extern "C" int sweet_is_b0s(void);    /* SweetPlatformExpert.cpp, xnu 0370 */
+ 
+ extern "C" int taimen_fw_load(const char *path, uint32_t max, void **data, uint32_t *len);   /* taimen_fwfile.c */
+ extern "C" void taimen_fw_free(void *data, uint32_t len);
+@@ -3159,6 +3160,10 @@
+ void
+ taimen_sensors_init(void)
+ {
++	/* b0s (xnu 0375): MSM8998/MSM8996 hardware, not on Exynos 2200 */
++	if (sweet_is_b0s()) {
++		return;
++	}
+ 	int level = 8;  /* 0354: the default, every stream (taimensensors=0 or 1: no SLPI) */
+ 	thread_t t;
+ 	(void)PE_parse_boot_argn("taimensensors", &level, sizeof(level));
