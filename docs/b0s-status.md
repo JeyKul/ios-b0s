@@ -4,21 +4,22 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 (Xclipse 920, RDNA2; Samsung `sgpu` = amdgpu fork, `drivers/gpu/drm/samsung/sgpu` in ExtremeXT/android_kernel_samsung_s5e9925).
 
 
-## 2026-11-06: GPU power, where it stands (newest first)
-- Boots 24-26 (0388-0390, b0sgpu=1): rail on (V_PWREN bit 10, VGPIO_TX bit 7 acked), G3DCORE_STATUS only after
-  the EVT1.0 G3DCORE_CONFIGURATION write, then the first BG3D_PWRCTL (0x16cd0000) read freezes the SoC.
-- Missing step (sgpu_governor.c:1103): before any G3D access Linux calls cal_dfs_set_rate(0xb04000d, boot_freq) =
-  ACPM DVFS: APM sets the G3D voltage and PLL. Only then is BG3D_DVFS (0x16cd0000) mapped.
-- ACPM DVFS (cal-if/acpm_dvfs.c exynos_acpm_set_rate): channel 5 (DT acpm_dvfs acpm-ipc-channel),
-  cmd[4] = { id 13 (0xb04000d & 0xffff) | seq << 16, rate kHz, FREQ_REQ 0, 0 }. DT sgpu min_freq 302000.
-- ACPM IPC (acpm/acpm_ipc.c): mailbox 0x15900000, APM SRAM 0x02060000 (0x50000); struct acpm_framework at
-  SRAM + 0xf800 (ipc_channels offset, ipc_ap_max); struct ipc_channel { id, field, owner, type, channel_info ch,
-  ap_poll }, channel_info { rx_rear, rx_front, rx_base, rx_indr_buf, rx_indr_buf_base, rx_indr_buf_size, tx_rear,
-  tx_front, tx_base, q_len, q_elem_size, credit, mbox_addr }. AP TX queue = the channel's rx_* fields: write cmd at
-  rx_base + size * front, front = (front + 1) % q_len, then INTGR0 = (1 << ch) << 16. Reply in the tx_* queue.
-- After DVFS: PD order is on-sequence, then DTZPC restore SMC (SMC_CMD_PREAPRE_PD_ONOFF 0x82000410, 1,
-  need_smc 0x16c10204, 2) + S2MPU restore, then cmu_init on first on (SPARE_CTRL 0x15863c14).
-- Never read Linux debugfs clk/exynos-pd on the phone: both froze TWRP (they touch powered-off blocks).
+## 2026-11-06 evening: ACPM / GPU (newest first; details in docs/b0s-gpu-handoff.md)
+- 0395 (boot 31): plugin table at SRAM 0x6DF0, 12 entries, stride 48 (not 32). Plugins 0-7 all attached
+  (incl. plugin 2 = ch 5's owner), so "detached DVFS plugin" is unlikely. 0394 (pointer-chasing dump) froze.
+- 0393 (boot 29): channel table at SRAM 0x7030, ipc_ap_max 13, 72 B per channel. **ch 5 (DVFS) is TYPE_BUFFER,
+  q_len 1, elem 16**; with Samsung's "front+1 != rear" full check, q_len 1 never sends. Open: how Android sends on it.
+- 0392 (boot 28): channel_info rear/front/base are SRAM offsets of the queue words (ch5 AP->APM rear 0xF308,
+  front 0xF30C, base 0xF310; APM->AP rear 0xF2E8, front 0xF2EC, base 0xF2F0). 0391 used them as indices and
+  wrote past the SRAM map (froze). With offsets: no freeze, no reply in 100 ms.
+- Rules: no pointer chasing in APM SRAM; no test commands on other channels; b0sgpu=1 only; one change per boot.
+- Boots 24-26 (0388-0390): rail on (V_PWREN bit 10, VGPIO_TX bit 7), G3DCORE_STATUS only after the EVT1.0
+  G3DCORE_CONFIGURATION write, then the first BG3D_PWRCTL (0x16cd0000) read freezes the SoC.
+- Missing step (sgpu_governor.c:1103): Linux calls cal_dfs_set_rate(0xb04000d, boot_freq) = ACPM DVFS (ch 5,
+  cmd { id 13 | seq << 16, rate kHz, FREQ_REQ 0, start_time }, response = !fast) before any G3D access.
+- After DVFS: PD on-sequence, then DTZPC restore SMC (0x82000410, 1, need_smc 0x16c10204, 2) + S2MPU restore,
+  then cmu_init on first on (SPARE_CTRL 0x15863c14).
+- Never read Linux debugfs clk/exynos-pd on the phone: both froze TWRP.
 
 ## Device (measured, TWRP, 2026-11-06)
 - Bootloader S908BXXUDFYD9, unlocked (orange), TWRP 5.10.223 kernel.
