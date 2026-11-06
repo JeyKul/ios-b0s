@@ -1,6 +1,7 @@
 # Galaxy S22 Ultra (SM-S908B, b0s, Exynos 2200 / s5e9925) status
 
 ## Summary (2026-11-06, project paused)
+**Full handover guide (A to Z, reproduce from a stock phone): `docs/b0s-guide.md`.**
 **Works:** iOS 16.7.16 (iPhone X userland) boots to the lock screen and home screen on open-source XNU:
 16 KiB-page kernel (MACHINE_CONFIG B0S), 8 cores, 9.03 GiB RAM, full-panel 1440x3084 GUI, touch, HFS+ root
 grown over all of userdata (~463 GB). Software rendering only.

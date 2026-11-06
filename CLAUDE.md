@@ -30,3 +30,4 @@ iOS 16 userland + open-source XNU on the Galaxy S22 Ultra (b0s, Exynos 2200, Xcl
 - `xnu/patches/NNNN-*.patch` — all kernel changes; b0s drivers in `bsd/dev/b0s_*.c`, hooked from `sweet_ufs.c`.
 - `shim/` — the boot shim (stage 2) and its UFS log. `tools/` — image/ADT/payload builders.
 - `docs/b0s-status.md` — current state and next steps.
+- `docs/b0s-guide.md` — full A-Z guide (setup, boot flow, every subsystem, pitfalls). `docs/b0s-gpu-handoff.md` — GPU/ACPM detail.
