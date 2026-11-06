@@ -79,6 +79,15 @@ if B0S:
                   cpus=[(c << 8, 0 if c < 4 else 1 if c < 7 else 2,
                          1820000000 if c < 4 else 2520000000 if c < 7 else 2800000000) for c in range(8)])
     TIMEBASE = 25600000
+    # B0S_BASE / B0S_MEM: XNU's one RAM range. The largest free one in the live FDT is
+    # 0x8_bb600000 (end of sec_rdx_bootdev) .. 0xa_fe600000 (el2_earlymem), ~9 GiB.
+    if os.environ.get('B0S_BASE'):
+        TAIMEN['phys_base'] = int(os.environ['B0S_BASE'], 0)
+    if os.environ.get('B0S_MEM'):
+        TAIMEN['mem_size'] = int(os.environ['B0S_MEM'], 0)
+    assert 0x8bb600000 <= TAIMEN['phys_base'] and TAIMEN['phys_base'] + TAIMEN['mem_size'] <= 0xafe600000 \
+        and TAIMEN['mem_size'] % 0x200000 == 0 and TAIMEN['phys_base'] % 0x200000 == 0, \
+        (hex(TAIMEN['phys_base']), hex(TAIMEN['mem_size']))
 # GTS4L_IPAD=1: the userland is the iPad 6 (iPad7,5 / J71bAP) IPSW; research/ipsw-x/j71bap.adt extracted as d22ap.adt.
 GTS4L_IPAD = '--gts4l' in sys.argv and os.environ.get('GTS4L_IPAD') in ('1', '2')
 # GTS4L_IPAD=2: the panel's own 1600x2560 instead of the iPad's 1536x2048, for gts4lipad=2
