@@ -67,6 +67,18 @@ TAIMEN = dict(
 # PP0 autorefresh on and a CTL0 START freezes the panel, so no kickoff-reg: the console only draws.
 if '--gts4l' in sys.argv:
     TAIMEN.update(fb_w=2560, fb_h=1600, fb_kickoff=None)
+# Galaxy S22 Ultra (b0s, Exynos 2200 / s5e9925), from its live FDT and the b0s stage-1 shim (docs/b0s-status.md).
+# Runs the TAIMEN (4K) kernel with every Qualcomm driver off. XNU's RAM: 0x9_00000000, free in the live FDT.
+# Timer: the DT's 25.6 MHz (CNTFRQ_EL0 reads 26 MHz; not yet measured). Virtual timer PPI 11 = INTID 27.
+B0S = '--b0s' in sys.argv
+if B0S:
+    TAIMEN.update(phys_base=0x900000000, mem_size=0x80000000, gicd=0x10200000, gicr=0x10240000, vtimer=27,
+                  fb=0xf6200000, fb_size=0x1100000, fb_w=1440, fb_h=3088, fb_bpp=32, fb_kickoff=None,
+                  ufs=0x11100000, ufs_size=0x3000,
+                  # MPIDR Aff1 = core: 4 x A510, 3 x A710, 1 x X2 (nominal clocks, descriptive only)
+                  cpus=[(c << 8, 0 if c < 4 else 1 if c < 7 else 2,
+                         1820000000 if c < 4 else 2520000000 if c < 7 else 2800000000) for c in range(8)])
+    TIMEBASE = 25600000
 # GTS4L_IPAD=1: the userland is the iPad 6 (iPad7,5 / J71bAP) IPSW; research/ipsw-x/j71bap.adt extracted as d22ap.adt.
 GTS4L_IPAD = '--gts4l' in sys.argv and os.environ.get('GTS4L_IPAD') in ('1', '2')
 # GTS4L_IPAD=2: the panel's own 1600x2560 instead of the iPad's 1536x2048, for gts4lipad=2
@@ -390,7 +402,7 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
 
 
 if __name__ == '__main__':
-    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, pixel1='--pixel1' in sys.argv, taimen='--taimen' in sys.argv or '--gts4l' in sys.argv)
+    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, pixel1='--pixel1' in sys.argv, taimen='--taimen' in sys.argv or '--gts4l' in sys.argv or '--b0s' in sys.argv)
     blob = adt.serialize(root)
     open(sys.argv[1], 'wb').write(blob)
     if '--dump' in sys.argv:
