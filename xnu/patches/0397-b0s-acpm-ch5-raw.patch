@@ -1,0 +1,20 @@
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -324,6 +324,17 @@
+ 	step("ACPM DVFS G3D");
+ 	acpm_dump();
+ 	acpm_dump_plugins();
++	/*
++	 * 0397, read-only: Samsung's send on ch 5 (q_len 1) waits until APM's consumer word (rx_rear, SRAM 0xF308)
++	 * is != 0; boots 28-32 read 0. Dump the whole ch 5 queue area 0xF2E0-0xF31F (inside what 0392 read) and
++	 * the mailbox status/mask (acpm_ipc.h: INTMR0 0x10, INTSR0 0x14, INTMR1 0x24, INTSR1 0x28). Nothing is sent.
++	 */
++	step("ACPM ch 5 raw words");
++	for (uint32_t o = 0xf2e0; o < 0xf320; o += 0x10) {
++		printf("B0S GPU: SRAM 0x%x: %08x %08x %08x %08x\n", o, rd(sram, o), rd(sram, o + 4), rd(sram, o + 8), rd(sram, o + 12));
++	}
++	printf("B0S GPU: mbox INTMR0 0x%x INTSR0 0x%x INTMR1 0x%x INTSR1 0x%x\n", rd(mbox, 0x10), rd(mbox, 0x14),
++	    rd(mbox, 0x24), rd(mbox, 0x28));
+ 	uint32_t rep[4] = { 0 };
+ 	int e = acpm_send(ACPM_CH_DVFS, DVFS_ID_G3D, G3D_RATE_KHZ, 0 /* FREQ_REQ */, 0, rep);
+ 	printf("B0S GPU: DVFS reply %d: %08x %08x %08x %08x; PLL_G3D 0x%x 0x%x\n", e, rep[0], rep[1], rep[2], rep[3],
