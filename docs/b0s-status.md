@@ -45,3 +45,12 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 - initrd 0x85100000-0x8644c164 = vendor ramdisk (0x134ba9d) + boot ramdisk (unaligned, at 0x8644ba9d) + bootconfig.
   The stage 2 loader must find the payload by magic and copy it aligned.
 - WTCON 0x1b7390 -> 0x1b7180 after kill_dog. DECON 0x30 reads 0x10010 after the 0x1281 write; fb writes show anyway.
+
+## XNU boots (2026-11-06)
+- Boot 2 (gts4l kernel 0369): up to "starting device-tree platform expert", hung reading the APSS WDT. 0370 fixed it.
+- Boot 3 (0370): to the root wait (`Waiting on <dict>`), no root device.
+- Boot 4 (0371, rd=ufsroot0): UFS transport works; TEST UNIT READY: ocs 0, upiu 0x21, response 0x1, status 0x2 (x3).
+  0373 prints the sense data and wakes the device W-LUN with START STOP UNIT.
+- Boot 5 (0372, cpus=8, PSCI over hvc): all 8 cores up.
+- Root: iOS 16.7.16 iPhone X image on userdata. A raw adb exec-in stream on a slow port lost bytes (188/256 chunks bad);
+  written again in verified 1 GiB parts over USB 3.
