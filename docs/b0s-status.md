@@ -69,3 +69,7 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 - Flash flow: tools/b0s-boot-xnu.sh KERNEL rd=ufsroot0 ufsrw=1 sweetlog=1 ... sweetfb_native=1 sweetfb_noconsole=1
   cpus=8 (ROOTFIX=~/gts4l-xnu/recon/rootfix.bin); dd to boot from TWRP; log = last 4100 KiB of userdata
   (tools/sweet-log.py). Check SPAN by pattern (movk #0x34d4 before msr sctlr_el1), not by offset.
+- Root grown to the whole userdata (0385, b0sgrowroot=1): 16384 -> 474124 MiB in 686 ms.
+- **16 KiB kernel (MACHINE_CONFIG B0S, 0386-0387) boots iOS with 9.03 GiB** (B0S_BASE=0x8bc000000
+  B0S_MEM=0x242000000). The 4 KiB TAIMEN kernel tops out between 4 and 6 GiB (kmem_range_init). xnu-mini builds
+  B0S on push.
