@@ -1,0 +1,118 @@
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -33,6 +33,19 @@
+ #define G3D_SYSREG      0x16c00000UL
+ #define GPU_RMMIO       0x16e00000UL
+ 
++/*
++ * ACPM IPC (acpm/acpm_ipc.c, fw_header/framework.h), DT acpm_ipc: mailbox 0x15900000, APM SRAM 0x02060000
++ * (0x50000), struct acpm_framework at SRAM + 0xf800. DVFS: DT acpm_dvfs acpm-ipc-channel 5; cal-if/acpm_dvfs.c
++ * exynos_acpm_set_rate cmd = { id | seq << 16, rate kHz, FREQ_REQ 0, 0 }; G3D id = 0xb04000d & 0xffff = 13.
++ */
++#define ACPM_MBOX       0x15900000UL
++#define ACPM_INTGR0     0x008
++#define ACPM_SRAM       0x02060000UL
++#define ACPM_INITDATA   0xf800
++#define ACPM_CH_DVFS    5
++#define DVFS_ID_G3D     13
++#define G3D_RATE_KHZ    302000          /* DT sgpu min_freq 0x49f98 */
++
+ #define PWRCTL_CTL2     0x4
+ #define PWRCTL_STATUS   0x8
+ 
+@@ -45,7 +58,7 @@
+ #define mmCC_GC_SHADER_ARRAY_CONFIG     0x100f
+ #define mmRLC_SAFE_MODE                 0x4ca0  /* segment 1 */
+ 
+-static vm_offset_t pmu, cmu, dd, strmux, pwr, sysreg, rmmio;
++static vm_offset_t pmu, cmu, dd, strmux, pwr, sysreg, rmmio, mbox, sram;
+ 
+ extern void sweet_log_kick(void);       /* bsd/dev/sweet_ufs.c */
+ 
+@@ -78,6 +91,56 @@
+ 	return false;
+ }
+ 
++/* struct ipc_channel: id, field, owner, type, channel_info (13 x u32), ap_poll = 72 bytes */
++#define IPC_CH_SIZE     72
++#define CH_INFO         16
++enum { RX_REAR = 0, RX_FRONT = 4, RX_BASE = 8, TX_REAR = 24, TX_FRONT = 28, TX_BASE = 32, Q_LEN = 36, Q_ELEM = 40 };
++
++/* One request on channel ch, polled reply: the AP sends on the channel's rx_* queue, APM answers on tx_*. */
++static int
++acpm_send(unsigned ch, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3, uint32_t reply[4])
++{
++	uint32_t chans = rd(sram, ACPM_INITDATA + 8), ap_max = rd(sram, ACPM_INITDATA + 24);
++	if (ch >= ap_max || chans >= 0x50000) {
++		printf("B0S GPU: ACPM initdata odd: ipc_channels 0x%x ipc_ap_max %u\n", chans, ap_max);
++		return EINVAL;
++	}
++	uint32_t c = chans + ch * IPC_CH_SIZE, ci = c + CH_INFO;
++	uint32_t id = rd(sram, c), len = rd(sram, ci + Q_LEN), size = rd(sram, ci + Q_ELEM);
++	uint32_t txb = rd(sram, ci + RX_BASE), rxb = rd(sram, ci + TX_BASE);
++	printf("B0S GPU: ACPM ch %u: id %u q_len %u elem %u poll %u, tx base 0x%x f/r %u/%u, rx base 0x%x f/r %u/%u\n",
++	    ch, id, len, size, rd(sram, ci + 52), txb, rd(sram, ci + RX_FRONT), rd(sram, ci + RX_REAR),
++	    rxb, rd(sram, ci + TX_FRONT), rd(sram, ci + TX_REAR));
++	if (id != ch || len == 0 || len > 64 || size < 16 || size > 64 || txb >= 0x50000 || rxb >= 0x50000) {
++		return EINVAL;
++	}
++	uint32_t front = rd(sram, ci + RX_FRONT), next = (front + 1) % len;
++	if (next == rd(sram, ci + RX_REAR)) {
++		printf("B0S GPU: ACPM ch %u queue full\n", ch);
++		return EBUSY;
++	}
++	uint32_t seq = 1;
++	uint32_t cmd[4] = { (c0 & ~(0x3fu << 16)) | (seq << 16), c1, c2, c3 };
++	for (uint32_t o = 0; o < size; o += 4) {
++		wr(sram, txb + size * front + o, o < 16 ? cmd[o / 4] : 0);
++	}
++	wr(sram, ci + RX_FRONT, next);
++	wr(mbox, ACPM_INTGR0, (1u << ch) << 16);
++	for (int t = 0; t < 100000; t++) {
++		uint32_t r = rd(sram, ci + TX_REAR), f = rd(sram, ci + TX_FRONT);
++		if (r != f) {
++			for (int k = 0; k < 4; k++) {
++				reply[k] = rd(sram, rxb + size * r + 4 * k);
++			}
++			wr(sram, ci + TX_REAR, (r + 1) % len);
++			return 0;
++		}
++		delay(1);
++	}
++	printf("B0S GPU: ACPM ch %u: no reply in 100 ms\n", ch);
++	return ETIMEDOUT;
++}
++
+ static bool
+ g3dcore_on_evt1_1(void)
+ {
+@@ -141,7 +204,9 @@
+ 	pwr = ml_io_map(BG3D_PWRCTL, 0x1000);
+ 	sysreg = ml_io_map(G3D_SYSREG, 0x1000);
+ 	rmmio = ml_io_map(GPU_RMMIO, 0x100000);
+-	if (!pmu || !cmu || !dd || !strmux || !pwr || !sysreg || !rmmio) {
++	mbox = ml_io_map(ACPM_MBOX, 0x1000);
++	sram = ml_io_map(ACPM_SRAM, 0x50000);
++	if (!mbox || !sram || !pmu || !cmu || !dd || !strmux || !pwr || !sysreg || !rmmio) {
+ 		printf("B0S GPU: mapping failed\n");
+ 		return;
+ 	}
+@@ -150,6 +215,18 @@
+ 	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pmu, 0x0a10));
+ 	step("CMU_G3D read");
+ 	printf("B0S GPU: PLL_G3D 0x%x 0x%x HCHGEN 0x%x\n", rd(cmu, 0x100), rd(cmu, 0x104), rd(cmu, 0x860));
++	/*
++	 * Boots 24-26: G3D froze on first access. Linux sets the G3D DVFS level through ACPM before any G3D
++	 * access (sgpu_governor.c:1103 cal_dfs_set_rate): APM sets the rail voltage and PLL_G3D.
++	 */
++	step("ACPM DVFS G3D");
++	uint32_t rep[4] = { 0 };
++	int e = acpm_send(ACPM_CH_DVFS, DVFS_ID_G3D, G3D_RATE_KHZ, 0 /* FREQ_REQ */, 0, rep);
++	printf("B0S GPU: DVFS reply %d: %08x %08x %08x %08x; PLL_G3D 0x%x 0x%x\n", e, rep[0], rep[1], rep[2], rep[3],
++	    rd(cmu, 0x100), rd(cmu, 0x104));
++	if (e != 0) {
++		return;
++	}
+ 	bool ok = g3dcore_on_evt1_1();
+ 	printf("B0S GPU: power-on %s: G3DCORE_STATUS 0x%x V_PWREN 0x%x PWRCTL ctl2 0x%x status 0x%x\n", ok ? "done" : "FAILED",
+ 	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS));
