@@ -1,0 +1,33 @@
+--- a/bsd/dev/b0s_touch.c
++++ b/bsd/dev/b0s_touch.c
+@@ -76,6 +76,7 @@
+ #define SPI_PACKET_CNT  0x20
+ #define SPI_PENDING_CLR 0x24
+ #define SPI_SWAP_CFG    0x28
++#define SPI_FB_CLK      0x2c
+ #define USI_CON         0xc4
+ #define USI_OPTION      0xc8
+ #define CH_SW_RST       (1u << 5)
+@@ -179,6 +180,7 @@
+ 	uint32_t ch = rd(spi, SPI_CH_CFG) & ~(CH_TXCH_ON | CH_RXCH_ON);
+ 	wr(spi, SPI_CH_CFG, ch | CH_SW_RST);
+ 	wr(spi, SPI_CH_CFG, ch & ~CH_SW_RST);
++	wr(spi, SPI_FB_CLK, 0);                         /* s3c64xx: cs->fb_delay & 3, DT spi-feedback-delay 0 */
+ 	wr(spi, SPI_MODE_CFG, TRAILCNT | b0st_loopback); /* byte channel and bus size, no DMA */
+ 	wr(spi, SPI_PACKET_CNT, len | PACKET_CNT_EN);
+ 	b0st_cs(true);
+@@ -198,7 +200,14 @@
+ 		if (spins > 20000) {
+ 			b0st_cs(false);
+ 			wr(spi, SPI_CH_CFG, ch);
++			static int dumped;
+ 			printf("B0S TOUCH: SPI timeout: %u/%u bytes, status 0x%x\n", got, len, st);
++			if (!dumped++) {
++				printf("B0S TOUCH: stall: ch 0x%x mode 0x%x cs 0x%x pkt 0x%x fb 0x%x swap 0x%x, gpp2 con 0x%x dat 0x%x pud 0x%x drv 0x%x\n",
++				    rd(spi, SPI_CH_CFG), rd(spi, SPI_MODE_CFG), rd(spi, SPI_SLAVE_SEL), rd(spi, SPI_PACKET_CNT),
++				    rd(spi, SPI_FB_CLK), rd(spi, SPI_SWAP_CFG), rd(gpio_p2, GPP2), rd(gpio_p2, GPP2 + 4),
++				    rd(gpio_p2, GPP2 + 8), rd(gpio_p2, GPP2 + 0xc));
++			}
+ 			return ETIMEDOUT;
+ 		}
+ 		if (got < len) {
