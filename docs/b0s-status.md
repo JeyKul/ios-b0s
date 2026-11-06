@@ -15,3 +15,16 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 
 ## Shim
 `shim/build-b0s.sh` -> `shim/out/b0s-boot.img`: stage 1 diag (colour bars, EL, ID regs, WDT off, DECON regs).
+
+## Platform (live DT)
+- Kernel runs at EL1: PSCI `method = "hvc"` (Samsung EL2 below us). Arch timer 25.6 MHz.
+- GICv3: GICD 0x10200000, GICR 0x10240000 (2 MiB). CPUs MPIDR 0x000-0x700 (aff1 = core): 4x A510, 3x A710, 1x X2.
+
+## GPU plan (Xclipse 920)
+- sgpu = amdgpu fork, `CHIP_VANGOGH_LITE` (gfx10.3). Node: 0x16e00000 (1 MiB, SMN target), 0x16f00000,
+  0x16dc0000, 0x16cd0000, 0x16c00000; IRQ SPI 0x1d3; power domain pd_g3dcore; CMU cal id 0xb04000d; 302-1306 MHz.
+- Firmware: one signed unified blob (`unified_firmware_sign.h`, v2.15.1, 225280 B) in the kernel source, copied to
+  `sgpu_rmem` 0x8ff00000 (0xe0000), RLC backdoor autoload, then `exynos_verify_subsystem_fw("G3D_TMR")` (EL2).
+  No PSP. Same shape as the a540 zap shader on gts4l.
+- Userland: Mesa radeonsi/RADV for gfx10.3 (ACO), amdgpu winsys over a SweetGPU-style XNU service, replacing
+  freedreno in sweetgl/sweetmtl.
