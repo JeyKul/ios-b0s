@@ -10,7 +10,8 @@ out=$P/shim/out/b0s-payload; mkdir -p "$out"
 python3 -I "$P/tools/mkadt.py" "$out/b0s.adt" --b0s
 off="taimentouch=0 sweettouch=0 taimenhaptic=0 taimensensors=0 sweetusb=0 taimenaudio=0 taimenmic=0 taimenwifi=0"
 off="$off taimenwdt=0 sweetkeys=0 sweetperf=0 sweetbattery=0 sweetlog=0 gts4ltouch=0 gts4lkeys=0 gts4lpen=0"
-cmdline="debug=0xc serial=3 cpus=1 keepsyms=1 -v $off $*"
+# sweetaccel/sweetfb_gpu: no GPU-assisted presents (the Adreno path); b0s=1: xnu 0370
+cmdline="debug=0xc serial=3 cpus=1 keepsyms=1 -v b0s=1 taimenpscihvc=1 sweetaccel=0 sweetfb_gpu=0 $off $*"
 cmdline=$(printf '%s\n' "$cmdline" | awk '{ for (i = NF; i >= 1; i--) { k = $i; sub(/=.*/, "", k);
 	if (!(k in seen)) { seen[k] = 1; keep[++n] = $i } }
 	for (i = n; i >= 1; i--) printf "%s%s", keep[i], (i > 1 ? " " : "\n") }')
