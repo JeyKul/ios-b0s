@@ -1,0 +1,50 @@
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -150,18 +150,12 @@
+ 	if (num == 0 || num > 32 || !sram_ok(base, num * 64)) {
+ 		return;
+ 	}
+-	step("ACPM plugin table, first word");
+-	uint32_t id0 = rd(sram, base), stride = 0;
+-	for (uint32_t s = 32; s <= 96 && num > 1; s += 4) {
+-		if (rd(sram, base + s) == id0 + 1) {
+-			stride = s;
+-			break;
+-		}
+-	}
+-	printf("B0S GPU: ACPM plugin stride %u\n", stride);
+-	if (stride == 0) {
+-		return;
+-	}
++	/*
++	 * 0396: the stride is 48 (boot 31 decode: id, base_addr, acpm_ops, plugin_ops, secure_mask, extern_mask,
++	 * timer x2, is_attached, size, stay_attached?, fw_name ptr). The name is printed only if its pointer lies
++	 * in 0x6b00-0x7030, the area already read safely; no other pointer is followed.
++	 */
++	const uint32_t stride = 48;
+ 	for (uint32_t i = 0; i < num; i++) {
+ 		uint32_t e = base + i * stride;
+ 		step("ACPM plugin entry");
+@@ -169,7 +163,21 @@
+ 		for (uint32_t o = 0; o < stride; o += 4) {
+ 			printf(" %08x", rd(sram, e + o));
+ 		}
+-		printf("\n");
++		uint32_t np = rd(sram, e + 44);
++		char name[33];
++		unsigned n = 0;
++		if (np >= 0x6b00 && np < 0x7030) {
++			for (; n < 32 && np + n < 0x7030; n++) {
++				uint32_t w = rd(sram, (np + n) & ~3u);
++				char ch = (char)(w >> (8 * ((np + n) & 3)));
++				if (ch < 0x20 || ch > 0x7e) {
++					break;
++				}
++				name[n] = ch;
++			}
++		}
++		name[n] = 0;
++		printf(" name \"%s\"\n", name);
+ 	}
+ }
+ 
