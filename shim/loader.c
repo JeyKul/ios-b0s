@@ -14,8 +14,8 @@
 
 #define BOOT_LINE_LENGTH	608
 #define PAGE_16K		0x4000UL
-/* b0s: free high DRAM below XNU's 0x900000000 (sec_rdx_bootdev ends at 0x8bb600000) */
-#define B0S_PAYLOAD_BUF		0x8c0000000UL
+/* b0s: free low-bank DRAM (no reserved-memory node in 0xc4000000-0xdfffffff), outside every XNU RAM range */
+#define B0S_PAYLOAD_BUF		0xd0000000UL
 
 struct payload_seg {
 	uint64_t vmaddr, vmsize, file_off, file_size;
