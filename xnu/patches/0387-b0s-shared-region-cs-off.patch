@@ -1,0 +1,17 @@
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -810,8 +810,12 @@
+ 		goto done;
+ 	}
+ 
+-#if defined(ARM64_BOARD_CONFIG_TAIMEN) && !defined(ARM64_BOARD_CONFIG_B0S)
+-	/* Bring-up: the 16 KiB-signed iOS cache runs on 4 KiB VM pages. */
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++	/*
++	 * Bring-up: the 16 KiB-signed iOS cache runs on 4 KiB VM pages (TAIMEN). B0S (16 KiB, xnu 0387) too:
++	 * without trust caches the cache's text pages come out cs-invalid and processes die with "Text
++	 * page corruption detected" (boot 21: lsd, searchd).
++	 */
+ 	vm_map_cs_enforcement_set(sub_map, false);
+ #else
+ 	/* shared regions should always enforce code-signing */
