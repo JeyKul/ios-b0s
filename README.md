@@ -15,7 +15,7 @@ HFS+ root on the userdata partition. Nothing in the boot chain is replaced. Andr
 
 | Area | State |
 |---|---|
-| Boot | S-Boot (unlocked) → shim (`shim/b0s.c`) → XNU at EL1 under Samsung's EL2 hypervisor |
+| Boot | S-Boot (unlocked) enters the shim (`shim/b0s.c`) at **EL1**; the shim jumps to XNU, also at EL1. Samsung's hypervisor stays resident at EL2 (PSCI via `hvc`); we never run at EL2 |
 | Kernel | `MACHINE_CONFIG` **B0S**: 16 KiB pages, ARM_LARGE_MEMORY layout, `-mcpu=cortex-a76` |
 | CPU | 8/8 cores (PSCI over hvc), PAN handled (SCTLR.SPAN) |
 | RAM | 9.03 GiB of 12 (largest contiguous range, 0x8_bc000000–0xa_fe600000) |
