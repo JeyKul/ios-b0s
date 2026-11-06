@@ -65,7 +65,7 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 - Touch (0378-0384, bsd/dev/b0s_touch.c): rails on through ACPM (LDO28M 0x18->0xd8, LDO17S 0x30->0xf0), pins, USI
   SPI mode, SPI self-loopback OK. Real transfers stalled after one byte through boot 18: SPI2's ipclk is USI02
   (DT clock 0x771 = PERIC2 base + 5), not USI06, so it ran at 400 MHz / 4. 0384 sets USI02 / 16 (6.25 MHz SPI).
-  Not yet booted.
+  **Boot 19 (0384): touch works.**
 - Flash flow: tools/b0s-boot-xnu.sh KERNEL rd=ufsroot0 ufsrw=1 sweetlog=1 ... sweetfb_native=1 sweetfb_noconsole=1
   cpus=8 (ROOTFIX=~/gts4l-xnu/recon/rootfix.bin); dd to boot from TWRP; log = last 4100 KiB of userdata
   (tools/sweet-log.py). Check SPAN by pattern (movk #0x34d4 before msr sctlr_el1), not by offset.
