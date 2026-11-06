@@ -1,0 +1,39 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -309,8 +309,11 @@
+ 
+ 	uint32_t ocs = utrd->dw2 & 0xff;
+ 	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
+-		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
+-		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
++		/* Response UPIU: sense data length at 32-33, fixed-format sense from 34 (key, ASC, ASCQ). */
++		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x"
++		    " sense len %u key 0x%x asc 0x%02x ascq 0x%02x\n",
++		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7],
++		    ucd->resp[32] << 8 | ucd->resp[33], ucd->resp[36] & 0xf, ucd->resp[46], ucd->resp[47]);
+ 		return EIO;
+ 	}
+ 	return 0;
+@@ -772,6 +775,22 @@
+ 		/* The first command after the bootloader may report a unit attention. */
+ 		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
+ 		}
++		/*
++		 * b0s: TEST UNIT READY keeps failing after S-Boot (boot 4). Wake the device as Linux's
++		 * ufshcd_set_dev_pwr_mode does: START STOP UNIT, power condition ACTIVE, to the UFS
++		 * Device W-LUN (0xd0 in the UPIU), then try again.
++		 */
++		if (error && sweet_is_b0s()) {
++			static const uint8_t ssu[6] = { 0x1b, 0, 0, 0, 1u << 4, 0 };
++			uint8_t lun = su.lun;
++			su.lun = 0xd0;
++			for (int i = 0; i < 3 && (error = ufs_scsi(ssu, sizeof(ssu), 0, false)); i++) {
++			}
++			printf("SWEET UFS: b0s: START STOP UNIT (active) to the device W-LUN: %d\n", error);
++			su.lun = lun;
++			for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
++			}
++		}
+ 	}
+ 	if (!error) {
+ 		error = ufs_find_partition(want);
