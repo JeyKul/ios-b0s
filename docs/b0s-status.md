@@ -54,3 +54,11 @@ Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: 
 - Boot 5 (0372, cpus=8, PSCI over hvc): all 8 cores up.
 - Root: iOS 16.7.16 iPhone X image on userdata. A raw adb exec-in stream on a slow port lost bytes (188/256 chunks bad);
   written again in verified 1 GiB parts over USB 3.
+- Boot 6-8 (0373-0375): UFS sense 2/04/02 until START STOP UNIT (active) to the device W-LUN; root mounts, launchd
+  starts. Boot 9 (cpus=1) the same. Boot 10 (sweetsample): launchd blocked in dyld's first vm_allocate trap.
+- Cause: PAN. The TAIMEN config has no __ARM_PAN_AVAILABLE__ and SCTLR_EL1 SPAN=0, so every exception set
+  PSTATE.PAN on the A510/A710/X2 and copyout faulted forever. 0377 sets SPAN.
+- **Boot 11 (0375 + SPAN bit patched in the binary, cpus=8): iOS 16.7.16 boots to the GUI.** 1125x2436 canvas
+  1:1 in the middle of the panel, console over it, no touch. Boot 12: canvas 1440x3084, sweetfb_native=1,
+  sweetfb_noconsole=1.
+- Builds: xnu-mini (self-hosted M1, Xcode 27 + 0376) 7m48s cold; hosted macos-15 3m54s with cache.
