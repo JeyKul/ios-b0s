@@ -1,0 +1,76 @@
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -47,6 +47,20 @@
+ 
+ static vm_offset_t pmu, cmu, dd, strmux, pwr, sysreg, rmmio;
+ 
++extern void sweet_log_kick(void);       /* bsd/dev/sweet_ufs.c */
++
++/*
++ * A read of a powered-off G3D block stalls the bus and freezes the whole SoC, log thread included
++ * (boot 24 hung with no line on disk). Before each risky step: print, push the log to UFS, wait.
++ */
++static void
++step(const char *what)
++{
++	printf("B0S GPU: step: %s\n", what);
++	sweet_log_kick();
++	delay(300000);
++}
++
+ static inline uint32_t rd(vm_offset_t b, uint32_t o) { return *(volatile uint32_t *)(b + o); }
+ static inline void wr(vm_offset_t b, uint32_t o, uint32_t v) { *(volatile uint32_t *)(b + o) = v; __builtin_arm_dsb(0xf); }
+ static inline void rmw(vm_offset_t b, uint32_t o, uint32_t mask, uint32_t val) { wr(b, o, (rd(b, o) & ~mask) | val); }
+@@ -67,13 +81,17 @@
+ static bool
+ g3dcore_on_evt1_1(void)
+ {
++	step("PLL_G3D (CMU_G3D, before the rail)");
+ 	rmw(cmu, 0x100, 1u << 4, 0);                    /* PLL_CON0_PLL_G3D */
+ 	wr(cmu, 0x104, 0x38000002);                     /* PLL_CON1_PLL_G3D */
++	step("V_PWREN");
+ 	wr(pmu, 0x3ef0 | 0xc000, 0xa);                  /* PMU_ALIVE/V_PWREN, set-bit atomic */
+ 	if (!waitfor("VGPIO_TX_MONITOR", pmu, 0x0a10, 1u << 7, 1u << 7)) {
+ 		return false;
+ 	}
+ 	delay(0x3c);
++	step("BG3D_PWRCTL (first access after the rail)");
++	printf("B0S GPU: PWRCTL ctl1 0x%x ctl2 0x%x status 0x%x\n", rd(pwr, 0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS));
+ 	if ((rd(pwr, PWRCTL_CTL2) & (1u << 5)) == 0) {
+ 		rmw(pwr, PWRCTL_CTL2, 0x3f, 0x12);
+ 	}
+@@ -83,6 +101,7 @@
+ 	if (!waitfor("BG3D_PWRCTL_STATUS", pwr, PWRCTL_STATUS, 1u << 1, 1u << 1)) {
+ 		return false;
+ 	}
++	step("dd_dump_config, STR_MUX, HCHGEN");
+ 	rmw(dd, 0x700, 1, 1);                           /* dd_dump_config */
+ 	rmw(strmux, 0x0, 1, 1);                         /* STR_MUX_CTRL_CORE */
+ 	rmw(cmu, 0x860, 1, 1);                          /* G3D_HCHGEN_CLKMUX_CORE */
+@@ -107,18 +126,22 @@
+ 		printf("B0S GPU: mapping failed\n");
+ 		return;
+ 	}
+-	printf("B0S GPU: before: G3DCORE_STATUS 0x%x V_PWREN 0x%x VGPIO_TX 0x%x PWRCTL ctl1 0x%x ctl2 0x%x status 0x%x, PLL_G3D 0x%x 0x%x\n",
+-	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pmu, 0x0a10), rd(pwr, 0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS),
+-	    rd(cmu, 0x100), rd(cmu, 0x104));
+-	bool ok = (rd(pwr, PWRCTL_STATUS) & (1u << 1)) || g3dcore_on_evt1_1();
++	/* only always-on blocks before the rail: PMU_ALIVE and CMU_G3D (Samsung's sequence writes it first) */
++	printf("B0S GPU: before: G3DCORE_STATUS 0x%x V_PWREN 0x%x VGPIO_TX 0x%x\n",
++	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pmu, 0x0a10));
++	step("CMU_G3D read");
++	printf("B0S GPU: PLL_G3D 0x%x 0x%x HCHGEN 0x%x\n", rd(cmu, 0x100), rd(cmu, 0x104), rd(cmu, 0x860));
++	bool ok = g3dcore_on_evt1_1();
+ 	printf("B0S GPU: power-on %s: G3DCORE_STATUS 0x%x V_PWREN 0x%x PWRCTL ctl2 0x%x status 0x%x\n", ok ? "done" : "FAILED",
+ 	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS));
+ 	if (!ok) {
+ 		return;
+ 	}
++	step("G3D sysreg, then GC registers");
+ 	wr(sysreg, 0x8, 0x6);                           /* vangogh_lite_gc_set_sysregs: MGCG */
+ 	printf("B0S GPU: GRBM_STATUS 0x%08x STATUS2 0x%08x CNTL 0x%08x CHIP_REVISION 0x%08x SHADER_ARRAY_CONFIG 0x%08x RLC_SAFE_MODE 0x%08x\n",
+ 	    rd(rmmio, GC0(mmGRBM_STATUS)), rd(rmmio, GC0(mmGRBM_STATUS2)), rd(rmmio, GC0(mmGRBM_CNTL)),
+ 	    rd(rmmio, GC0(mmGRBM_CHIP_REVISION)), rd(rmmio, GC0(mmCC_GC_SHADER_ARRAY_CONFIG)), rd(rmmio, GC1(mmRLC_SAFE_MODE)));
++	sweet_log_kick();
+ }
+ #endif /* ARM64_BOARD_CONFIG_TAIMEN */
