@@ -1,0 +1,104 @@
+--- a/bsd/dev/b0s_touch.c
++++ b/bsd/dev/b0s_touch.c
+@@ -92,7 +92,14 @@
+ #define CANVAS_H        3084            /* shim B0S_GUI_H */
+ #define FINGERS         10
+ 
+-static vm_offset_t mbox, cmu, sysreg, gpio_p2, gpio_al, spi;
++static vm_offset_t mbox, cmu, cmu_top, sysreg, gpio_p2, gpio_al, spi;
++static uint32_t b0st_loopback;          /* MODE_CFG SELF_LOOPBACK (bit 3) for the clock test */
++
++#define CMU_TOP                 0x1a320000UL
++#define TOP_MUX_PERIC2_IP0      0x1190
++#define TOP_DIV_PERIC2_IP0      0x18a0
++#define TOP_GAT_PERIC2_IP0      0x2178
++#define CMU_IP0_USER            0x600   /* PLL_CON0_MUX_CLKCMU_PERIC2_IP0_USER: MUX_SEL bit 4, BUSY bit 16 */
+ static int b0st_mode = 2;
+ static int b0st_sleep_chan;
+ 
+@@ -172,18 +179,18 @@
+ 	uint32_t ch = rd(spi, SPI_CH_CFG) & ~(CH_TXCH_ON | CH_RXCH_ON);
+ 	wr(spi, SPI_CH_CFG, ch | CH_SW_RST);
+ 	wr(spi, SPI_CH_CFG, ch & ~CH_SW_RST);
+-	wr(spi, SPI_MODE_CFG, TRAILCNT);                /* byte channel and bus size, no DMA */
++	wr(spi, SPI_MODE_CFG, TRAILCNT | b0st_loopback); /* byte channel and bus size, no DMA */
+ 	wr(spi, SPI_PACKET_CNT, len | PACKET_CNT_EN);
+ 	b0st_cs(true);
+ 	for (unsigned i = 0; i < len; i++) {
+-		*(volatile uint8_t *)(spi + SPI_TX_DATA) = tx ? tx[i] : 0;
++		*(volatile uint32_t *)(spi + SPI_TX_DATA) = tx ? tx[i] : 0;     /* writesb_32 */
+ 	}
+ 	wr(spi, SPI_CH_CFG, (ch & ~CH_SW_RST) | CH_TXCH_ON | CH_RXCH_ON);
+ 	unsigned got = 0;
+ 	for (int spins = 0; got < len; spins++) {
+ 		uint32_t st = rd(spi, SPI_STATUS);
+ 		for (unsigned n = ST_RX_LVL(st); n > 0 && got < len; n--, got++) {
+-			uint8_t b = *(volatile uint8_t *)(spi + SPI_RX_DATA);
++			uint8_t b = (uint8_t)*(volatile uint32_t *)(spi + SPI_RX_DATA);  /* readsb_32 */
+ 			if (rx) {
+ 				rx[got] = b;
+ 			}
+@@ -312,6 +319,29 @@
+ 	    b0st_irq_low() ? "low" : "high");
+ }
+ 
++/* SPI self-loopback: data comes back only if the SPI clock runs. */
++static bool
++b0st_loop_test(const char *tag)
++{
++	static const uint8_t t[4] = { 0xa5, 0x5a, 0x3c, 0xc3 };
++	uint8_t r[4] = { 0 };
++	b0st_loopback = 1u << 3;
++	int e = b0st_xfer(t, r, 4);
++	b0st_loopback = 0;
++	bool ok = e == 0 && memcmp(t, r, 4) == 0;
++	printf("B0S TOUCH: loopback [%s]: %d, rx %02x %02x %02x %02x -> %s\n", tag, e, r[0], r[1], r[2], r[3],
++	    ok ? "SPI clock runs" : "no SPI clock");
++	return ok;
++}
++
++static void
++b0st_clock_report(const char *tag)
++{
++	printf("B0S TOUCH: clocks [%s]: TOP mux 0x%x div 0x%x gate 0x%x, PERIC2 ip0_user 0x%x, usi06 mux 0x%x div 0x%x\n",
++	    tag, rd(cmu_top, TOP_MUX_PERIC2_IP0), rd(cmu_top, TOP_DIV_PERIC2_IP0), rd(cmu_top, TOP_GAT_PERIC2_IP0),
++	    rd(cmu, CMU_IP0_USER), rd(cmu, CMU_MUX_USI06), rd(cmu, CMU_DIV_USI06));
++}
++
+ static int
+ b0st_read_event(uint8_t ev[16])
+ {
+@@ -345,6 +375,17 @@
+ 	b0st_wait(50);
+ 	b0st_hw_setup();
+ 
++	b0st_clock_report("start");
++	if (!b0st_loop_test("as set")) {
++		/* boot 16: no SPI clock with every PERIC2-side gate forced on: open the CMU_TOP source */
++		wr(cmu_top, TOP_GAT_PERIC2_IP0, rd(cmu_top, TOP_GAT_PERIC2_IP0) | GAT_MANUAL | GAT_CG_VAL);
++		wr(cmu, CMU_IP0_USER, rd(cmu, CMU_IP0_USER) | (1u << 4));
++		for (int i = 0; (rd(cmu, CMU_IP0_USER) & (1u << 16)) && i < 1000; i++) {
++			delay(1);
++		}
++		b0st_clock_report("top gate on, ip0_user sel 1");
++		(void)b0st_loop_test("after top");
++	}
+ 	int e = stm_write(reset, sizeof(reset));
+ 	b0st_wait(30);
+ 	bool ready = b0st_ready(500);
+@@ -409,12 +450,13 @@
+ 		return;
+ 	}
+ 	mbox = ml_io_map(ACPM_MBOX, 0x1000);
+-	cmu = ml_io_map(CMU_PERIC2, 0x3000);
++	cmu = ml_io_map(CMU_PERIC2, 0x4000);
++	cmu_top = ml_io_map(CMU_TOP, 0x3000);
+ 	sysreg = ml_io_map(SYSREG_USI, 0x1000);
+ 	gpio_p2 = ml_io_map(GPIO_PERIC2, 0x1000);
+ 	gpio_al = ml_io_map(GPIO_ALIVE, 0x1000);
+ 	spi = ml_io_map(SPI2, 0x1000);
+-	if (!mbox || !cmu || !sysreg || !gpio_p2 || !gpio_al || !spi) {
++	if (!mbox || !cmu || !cmu_top || !sysreg || !gpio_p2 || !gpio_al || !spi) {
+ 		printf("B0S TOUCH: mapping failed\n");
+ 		return;
+ 	}
