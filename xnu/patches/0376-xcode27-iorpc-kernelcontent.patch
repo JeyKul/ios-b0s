@@ -1,0 +1,34 @@
+diff --git a/iokit/IOKit/IORPC.h b/iokit/IOKit/IORPC.h
+index 3ded78c..78259e6 100644
+--- a/iokit/IOKit/IORPC.h
++++ b/iokit/IOKit/IORPC.h
+@@ -224,6 +224,7 @@ struct IORPC {
+ 	IORPCMessageMach * reply;
+ 	uint32_t           sendSize;
+ 	uint32_t           replySize;
++	IORPCMessage     * kernelContent;   /* Xcode 27's iig reads the message from it in the kernel (newer xnu's IORPC) */
+ };
+ typedef struct IORPC IORPC;
+ 
+diff --git a/iokit/Kernel/IOUserServer.cpp b/iokit/Kernel/IOUserServer.cpp
+index 5d1d922..c5bc155 100644
+--- a/iokit/Kernel/IOUserServer.cpp
++++ b/iokit/Kernel/IOUserServer.cpp
+@@ -3209,7 +3209,8 @@ IOUserServer::server(ipc_kmsg_t requestkmsg, ipc_kmsg_t * pReply)
+ 		msgout = (typeof(msgout))ikm_header(replykmsg);
+ 	}
+ 
+-	IORPC rpc = { .message = msgin, .reply = msgout, .sendSize = msgin->msgh.msgh_size, .replySize = replyAlloc };
++	IORPC rpc = { .message = msgin, .reply = msgout, .sendSize = msgin->msgh.msgh_size, .replySize = replyAlloc,
++	              .kernelContent = IORPCMessageFromMach(msgin, false) };
+ 
+ 	if (object) {
+ 		kern_allocation_name_t prior;
+@@ -3358,6 +3359,7 @@ IOUserServerUEXTTrap(OSObject * object, void * p1, void * p2, void * p3, void *
+ 	rpc.sendSize  = mach->msgh.msgh_size;
+ 	rpc.reply     = (IORPCMessageMach *) (p + inSize);
+ 	rpc.replySize = ((uint32_t) (sizeof(buffer.buffer) - inSize));    // inSize was checked
++	rpc.kernelContent = IORPCMessageFromMach(mach, false);  // Xcode 27's iig dispatches on it
+ 
+ 	message->objects[0] = 0;
+ 	if ((action = OSDynamicCast(OSAction, object))) {
