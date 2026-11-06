@@ -19,7 +19,7 @@ on:
         description: also upload the build tree for local compiles (slow, rarely needed)
         default: "false"
   push:
-    branches: [main, taimen]
+    branches: [main, taimen, b0s]
     paths:
       - "xnu/patches/**"
       - ".github/workflows/xnu.yml"

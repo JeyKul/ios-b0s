@@ -1,0 +1,70 @@
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -60,6 +60,7 @@
+  */
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ extern "C" void taimen_gic_dump(const char *tag);
++extern "C" int sweet_is_b0s(void);                     /* b0s=1: Galaxy S22 Ultra, below */
+ extern "C" void taimen_thread_dump(const char *tag);
+ extern "C" void sweet_fbcon_regs(uint32_t r[10]);
+ extern "C" void sweet_fb_screenshot(const char *tag);  /* SweetFramebuffer.cpp */
+@@ -340,6 +341,10 @@
+ {
+ 	int enabled = 1;
+ 	PE_parse_boot_argn("taimenwdt", &enabled, sizeof(enabled));
++	if (sweet_is_b0s()) {
++		IOLog("TAIMEN WDT: none on b0s\n");
++		return;
++	}
+ 	volatile uint32_t *wdt = (volatile uint32_t *)ml_io_map(TAIMEN_WDT_PA, 0x1000);
+ 	if (wdt == NULL) {
+ 		IOLog("TAIMEN WDT: mapping failed\n");
+@@ -370,9 +375,33 @@
+  * APSS watchdog bites ~32 s later.
+  */
+ static volatile uint32_t *taimen_ps_hold;       /* mapped in start(); panic context must not map */
++/*
++ * Galaxy S22 Ultra (b0s, Exynos 2200), boot-arg b0s=1: the TAIMEN kernel on a Samsung SoC.
++ * No Qualcomm block exists there (a read of the APSS WDT hung boot 2), and the kernel runs at
++ * EL1 under Samsung's EL2 (PSCI method "hvc" in the live FDT).
++ */
++static int sweet_b0s = -1;
++extern "C" int
++sweet_is_b0s(void)
++{
++	if (sweet_b0s < 0) {
++		int on = 0;
++		(void)PE_parse_boot_argn("b0s", &on, sizeof(on));
++		sweet_b0s = on != 0;
++	}
++	return sweet_b0s;
++}
++
+ static int
+ taimen_halt_restart(unsigned int type __unused)
+ {
++	if (sweet_b0s > 0) {
++		register uint64_t x0 __asm__("x0") = 0x84000009ULL;     /* PSCI SYSTEM_RESET */
++		__asm__ volatile("dsb sy; hvc #0" : "+r"(x0) : : "x1", "x2", "x3", "memory");
++		for (;;) {
++			__asm__ volatile("wfi");
++		}
++	}
+ 	/*
+ 	 * Boot 15 (reset ladder): PSCI SYSTEM_RESET via smc and hvc both return
+ 	 * with x0 untouched under QHEE, and the APSS WDT bite no longer resets
+@@ -394,10 +423,12 @@
+ SweetPlatformExpert::start(IOService *provider)
+ {
+ #if defined(ARM64_BOARD_CONFIG_TAIMEN)
+-	taimen_ps_hold = (volatile uint32_t *)ml_io_map(0x10ac000, 0x1000);
++	if (!sweet_is_b0s()) {
++		taimen_ps_hold = (volatile uint32_t *)ml_io_map(0x10ac000, 0x1000);
++	}
+ 	PE_halt_restart = taimen_halt_restart;
+ #endif
+-	IOLog("SWEET: starting device-tree platform expert\n");
++	IOLog("SWEET: starting device-tree platform expert%s\n", sweet_b0s > 0 ? " (b0s)" : "");
+ 	if (!IODTPlatformExpert::start(provider)) {
+ 		return false;
+ 	}
