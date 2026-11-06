@@ -2,6 +2,7 @@
 # Galaxy S22 Ultra boot image: kernel Mach-O -> ADT (mkadt --b0s) -> SWEETXNU payload -> STAGE2 shim
 # boot image with the payload as its ramdisk. The TAIMEN kernel with every Qualcomm driver off.
 # No rd= by default: the Qualcomm UFS driver must never run here (rd=ufsroot0 starts it).
+# ROOTFIX=FILE: files the kernel writes into the iOS root (tools/taimen/mkrootfix.py).
 # Usage: tools/b0s-boot-xnu.sh KERNEL [extra boot-args]   -> shim/out/b0s-xnu.img
 set -euo pipefail
 P=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,5 +18,7 @@ cmdline=$(printf '%s\n' "$cmdline" | awk '{ for (i = NF; i >= 1; i--) { k = $i; 
 	for (i = n; i >= 1; i--) printf "%s%s", keep[i], (i > 1 ? " " : "\n") }')
 [ ${#cmdline} -le 607 ] || { echo "boot-args are ${#cmdline} bytes, over 607" >&2; exit 1; }
 echo "boot-args: $cmdline"
-python3 -I "$P/tools/mkpayload.py" "$kernel" "$out/b0s.adt" "$out/payload" --l2block 0x200000 --cmdline "$cmdline"
+blobs=()
+[ -n "${ROOTFIX:-}" ] && blobs+=(--blob "ROOTFIX=$(realpath "$ROOTFIX")")
+python3 -I "$P/tools/mkpayload.py" "$kernel" "$out/b0s.adt" "$out/payload" --l2block 0x200000 --cmdline "$cmdline" "${blobs[@]}"
 EXTRA_CFLAGS="-DSTAGE2" OUT=b0s-xnu.img "$P/shim/build-b0s.sh" "$out/payload"
