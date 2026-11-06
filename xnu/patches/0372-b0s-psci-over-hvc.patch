@@ -1,0 +1,15 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -101,9 +101,12 @@
+ static const char *const taimen_psci_ctx_name[TPSCI_N] = {"thread", "irq off", "irq off, pmr 0"};
+ static int taimen_psci_ctx = -1;        /* the first context PSCI_VERSION answered in */
+ 
++extern "C" int sweet_is_b0s(void);     /* SweetPlatformExpert.cpp, xnu 0370 */
+ static uint64_t
+ taimen_psci(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3, bool hvc, int ctx)
+ {
++	/* b0s: PSCI is "hvc" in the live FDT (Samsung's EL2 under the kernel) */
++	hvc = hvc || sweet_is_b0s();
+ 	boolean_t istate = TRUE;
+ 	uint64_t pmr = 0;
+ 	if (ctx != TPSCI_THREAD) {
