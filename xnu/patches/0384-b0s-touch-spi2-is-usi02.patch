@@ -1,0 +1,56 @@
+--- a/bsd/dev/b0s_touch.c
++++ b/bsd/dev/b0s_touch.c
+@@ -5,8 +5,8 @@
+  * (ExtremeXT/android_kernel_samsung_s5e9925):
+  *   SPI2      spi@11D40000 "samsung,exynos-spi", USI mode via sysreg_peric2_2_usi (0x11c22000) + 0x10,
+  *             FIFO 256 (level mask 0x1ff, RX level at bit 15, TX done bit 25), clock from CMU
+- *   clock     DOUT_DIV_CLK_PERIC2_USI06 (cmucal): mux 0x11c01028, div 0x11c01828, gates 0x11c0208c,
+- *             0x11c020fc (IPCLK), 0x11c02100 (PCLK). Mux 1 (400 MHz) / 16: SPI at ipclk/4 = 6.25 MHz.
++ *   clock     DOUT_DIV_CLK_PERIC2_USI02 (cmucal): mux 0x11c0101c, div 0x11c0181c, gates 0x11c02080,
++ *             0x11c020cc (IPCLK), 0x11c020d0 (PCLK), QCH 0x11c03080. Mux 1 (400 MHz) / 16: SPI at ipclk/4 = 6.25 MHz.
+  *   pins      spi_bus gpp2-0..2 function 2; CS gpp2-3 as a GPIO (cs-gpio, the STM driver drives it);
+  *             IRQ gpa1-2 (active low), read as level. GPIO_PERIC2 0x11c30000 (gpp2 at +0x40),
+  *             GPIO_ALIVE 0x15850000 (gpa1 at +0x20).
+@@ -46,14 +46,18 @@
+ #define ACPM_CH_SPMI    8
+ 
+ #define CMU_PERIC2      0x11c00000UL
+-#define CMU_MUX_USI06   0x1028
+-#define CMU_DIV_USI06   0x1828
+-#define CMU_GAT_RSTN    0x208c
+-#define CMU_GAT_IPCLK   0x20fc
+-#define CMU_GAT_PCLK    0x2100
++/*
++ * SPI2's ipclk is DT clock 0x771 = 1905 = CLK_PERIC2_BASE + 5 = DOUT_DIV_CLK_PERIC2_USI02 (boots 13-18 set up
++ * USI06 by mistake, so SPI2 ran at its default 400 MHz / 4 = 100 MHz: loopback fine, the pads not).
++ */
++#define CMU_MUX_USI06   0x101c          /* CLK_CON_MUX_MUX_CLK_PERIC2_USI02 (names kept: the SPI2 ipclk) */
++#define CMU_DIV_USI06   0x181c          /* CLK_CON_DIV_DIV_CLK_PERIC2_USI02 */
++#define CMU_GAT_RSTN    0x2080          /* ..._RSTNSYNC_SR_CLK_PERIC2_USI02_IPCLKPORT_CLK */
++#define CMU_GAT_IPCLK   0x20cc          /* ..._UID_USI02_USI_IPCLKPORT_IPCLK */
++#define CMU_GAT_PCLK    0x20d0          /* ..._UID_USI02_USI_IPCLKPORT_PCLK */
+ #define GAT_MANUAL      (1u << 20)
+ #define GAT_CG_VAL      (1u << 21)
+-#define CMU_QCH_USI06   0x3098          /* QCH_CON_USI06_USI_OIS_QCH: ENABLE 0, CLOCK_REQ 1, IGNORE_FORCE_PM_EN 2 */
++#define CMU_QCH_USI06   0x3080          /* QCH_CON_USI02_USI_QCH: ENABLE 0, CLOCK_REQ 1, IGNORE_FORCE_PM_EN 2 */
+ #define QCH_CLOCK_REQ   (1u << 1)
+ 
+ #define SYSREG_USI      0x11c22000UL
+@@ -198,8 +202,6 @@
+ 			}
+ 		}
+ 		if (spins > 20000) {
+-			b0st_cs(false);
+-			wr(spi, SPI_CH_CFG, ch);
+ 			static int dumped;
+ 			printf("B0S TOUCH: SPI timeout: %u/%u bytes, status 0x%x\n", got, len, st);
+ 			if (!dumped++) {
+@@ -208,6 +210,8 @@
+ 				    rd(spi, SPI_FB_CLK), rd(spi, SPI_SWAP_CFG), rd(gpio_p2, GPP2), rd(gpio_p2, GPP2 + 4),
+ 				    rd(gpio_p2, GPP2 + 8), rd(gpio_p2, GPP2 + 0xc));
+ 			}
++			b0st_cs(false);
++			wr(spi, SPI_CH_CFG, ch);
+ 			return ETIMEDOUT;
+ 		}
+ 		if (got < len) {
