@@ -1,7 +1,12 @@
 #pragma once
 #include <stdint.h>
 
-#ifdef GTS4L
+#ifdef B0S
+#define FB_BASE		0xf6200000UL	/* cmdline s3cfb.bootloaderfb */
+#define FB_W		1440
+#define FB_H		3088
+#define FB_BPP		4		/* ARGB8888 as uniLoader g0s */
+#elif defined(GTS4L)
 #define FB_BASE		0x9d400000UL	/* reserved-memory splash_region; fb0: 2560x1600, stride 10240 */
 #define FB_W		2560
 #define FB_H		1600
