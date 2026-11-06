@@ -1,5 +1,32 @@
 # Galaxy S22 Ultra (SM-S908B, b0s, Exynos 2200 / s5e9925) status
 
+## Summary (2026-11-06, project paused)
+**Works:** iOS 16.7.16 (iPhone X userland) boots to the lock screen and home screen on open-source XNU:
+16 KiB-page kernel (MACHINE_CONFIG B0S), 8 cores, 9.03 GiB RAM, full-panel 1440x3084 GUI, touch, HFS+ root
+grown over all of userdata (~463 GB). Software rendering only.
+**Not done:** GPU (blocked on ACPM DVFS, below), Wi-Fi, audio, sensors, buttons, battery, USB, brightness.
+
+**Patches (xnu/patches):** 0370 no Qualcomm WDT/PS_HOLD, PSCI over hvc · 0371/0373 Exynos UFS (128 B PRDT, FMP
+desctype 3, START STOP UNIT wake) · 0372 PSCI hvc for CPU_ON · 0374/0375 no MSM8998 drivers on b0s · 0377 SCTLR SPAN
+(PAN on ARMv8.1 cores hung launchd) · 0378-0384 touch (b0s_touch.c, STM FTS on SPI2 = USI02) · 0385 b0sgrowroot ·
+0386/0387 B0S 16 KiB config, shared-region CS off · 0388-0397 GPU/ACPM probes (b0sgpu=1, off by default).
+Shim/tools: shim/b0s.c, shim/build-b0s.sh, tools/b0s-boot-xnu.sh, tools/mkadt.py --b0s (B0S_BASE / B0S_MEM).
+
+**Resume (phone in TWRP, kernel from the newest xnu-mini run):**
+```
+B0S_BASE=0x8bc000000 B0S_MEM=0x242000000 ROOTFIX=~/gts4l-xnu/recon/rootfix.bin tools/b0s-boot-xnu.sh KERNEL.b0s \
+  rd=ufsroot0 ufsrw=1 sweetlog=1 cs_enforcement_disable=1 unentitled_ios_sim_launch=1 ignition_level=1 \
+  launchd_unsecure_cache=1 wdt_test=no_user_checkin sweetprof=- sweetsample=- sweetfb_native=1 sweetfb_noconsole=1 cpus=8
+adb push shim/out/b0s-xnu.img /tmp/b.img && adb shell 'dd if=/tmp/b.img of=/dev/block/by-name/boot bs=4M && sync'
+```
+Log: last 4100 KiB of userdata (tools/sweet-log.py). Without b0sgpu=1 nothing touches the GPU.
+Backups of every partition except userdata: ~/s22u-ios/backup (verified). Stock boot = backup/boot.img.
+
+**GPU next step:** 0397 (read-only ch 5 SRAM words + mailbox status) is flashed but its log was not read. Then:
+find how APM frees ch 5 (rx_rear 0xF308 != 0) on Android, send DVFS exactly as acpm_ipc.c, then BG3D_PWRCTL,
+then firmware (unified_firmware_sign.h -> sgpu_rmem 0x8ff00000, exynos_verify_subsystem_fw), rings, and a
+userland RADV (cf. github.com/JimVulkan/radv-xclipse, RADV on Samsung's sgpu) over an sgpu-compatible XNU service.
+
 Base: the gts4l tree (XNU xnu-8796 4K-page port, iOS/iPadOS 16 userland). Goal: the same on b0s, GPU first
 (Xclipse 920, RDNA2; Samsung `sgpu` = amdgpu fork, `drivers/gpu/drm/samsung/sgpu` in ExtremeXT/android_kernel_samsung_s5e9925).
 
