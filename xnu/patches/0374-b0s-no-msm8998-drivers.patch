@@ -1,0 +1,14 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -829,6 +829,11 @@
+ 	 * each driver is retargeted (docs/taimen-boot-audit.md).
+ 	 */
+ 	printf("SWEET UFS: taimen: Pixel 1 touch/usb/wlan drivers not started\n");
++	/* b0s: every driver below drives MSM8998 blocks; boot 6 hung right after the log started. */
++	if (sweet_is_b0s()) {
++		printf("SWEET UFS: b0s: no MSM8998 drivers (touch, keys, haptics, perf, GPU, modem, audio, sensors, USB)\n");
++		return 0;
++	}
+ 	/* retargeted to MSM8998 so far: touch (taimen_touch.c, docs/taimen-touch-plan.md) */
+ 	taimen_touch_init();
+ 	/* the SPMI arbiter for PMIC reads, and the keys with sweetkeys=1 (0225) */
