@@ -1,0 +1,14 @@
+--- a/bsd/dev/b0s_touch.c
++++ b/bsd/dev/b0s_touch.c
+@@ -157,6 +157,11 @@
+ {
+ 	uint32_t d = rd(gpio_p2, GPP2 + 4);
+ 	wr(gpio_p2, GPP2 + 4, active ? (d & ~(1u << 3)) : (d | (1u << 3)));
++	/*
++	 * s3c64xx_spi_set_cs also drives the controller's own nCS (SLAVE_SEL 0 = active) with a
++	 * GPIO CS: without it the controller never clocks the FIFO out (boots 13-14, TX level stuck).
++	 */
++	wr(spi, SPI_SLAVE_SEL, active ? 0 : 1);
+ }
+ 
+ static int
