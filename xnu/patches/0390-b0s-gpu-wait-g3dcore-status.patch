@@ -1,0 +1,28 @@
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -90,6 +90,25 @@
+ 		return false;
+ 	}
+ 	delay(0x3c);
++	/*
++	 * Boot 25: the first BG3D_PWRCTL read after V_PWREN froze the SoC; G3DCORE_STATUS was 0 before and
++	 * never checked after. Wait for it (PMU, always-on); if it stays 0, add the EVT1.0 sequence's
++	 * G3DCORE_CONFIGURATION = 1 (g3dcore_on) and wait again. Without it, nothing in G3D is touched:
++	 * the rail goes off again (V_PWREN clear-bit atomic, offset | 0x8000, pmucal_clr_bit_atomic).
++	 */
++	bool up = waitfor("G3DCORE_STATUS after V_PWREN", pmu, 0x2284, 1, 1);
++	printf("B0S GPU: after V_PWREN: G3DCORE_STATUS 0x%x V_PWREN 0x%x VGPIO_TX 0x%x\n",
++	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pmu, 0x0a10));
++	if (!up) {
++		rmw(pmu, 0x2280, 1, 1);                 /* G3DCORE_CONFIGURATION (g3dcore_on, EVT1.0) */
++		up = waitfor("G3DCORE_STATUS after CONFIGURATION", pmu, 0x2284, 1, 1);
++		printf("B0S GPU: after CONFIGURATION: G3DCORE_STATUS 0x%x\n", rd(pmu, 0x2284));
++	}
++	if (!up) {
++		wr(pmu, 0x3ef0 | 0x8000, 0xa);          /* V_PWREN clear-bit atomic */
++		printf("B0S GPU: G3DCORE did not come up; rail off again, no G3D access\n");
++		return false;
++	}
+ 	step("BG3D_PWRCTL (first access after the rail)");
+ 	printf("B0S GPU: PWRCTL ctl1 0x%x ctl2 0x%x status 0x%x\n", rd(pwr, 0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS));
+ 	if ((rd(pwr, PWRCTL_CTL2) & (1u << 5)) == 0) {
