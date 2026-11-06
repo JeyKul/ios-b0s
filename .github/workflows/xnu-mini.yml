@@ -18,11 +18,6 @@ on:
       package_buildtree:
         description: also upload the build tree for local compiles (slow, rarely needed)
         default: "false"
-  push:
-    branches: [main, taimen, b0s]
-    paths:
-      - "xnu/patches/**"
-      - ".github/workflows/xnu.yml"
 
 # One group per commit: the next kernel builds while the phone tests the last one (a group per
 # branch with cancel-in-progress cancelled a running build at every push). tools/windows/
