@@ -1,0 +1,34 @@
+--- a/bsd/dev/b0s_touch.c
++++ b/bsd/dev/b0s_touch.c
+@@ -6,8 +6,7 @@
+  *   SPI2      spi@11D40000 "samsung,exynos-spi", USI mode via sysreg_peric2_2_usi (0x11c22000) + 0x10,
+  *             FIFO 256 (level mask 0x1ff, RX level at bit 15, TX done bit 25), clock from CMU
+  *   clock     DOUT_DIV_CLK_PERIC2_USI06 (cmucal): mux 0x11c01028, div 0x11c01828, gates 0x11c0208c,
+- *             0x11c020fc (IPCLK), 0x11c02100 (PCLK). Mux 0 = OSCCLK: the SPI runs at OSC/4 (~6.4 MHz,
+- *             under the DT's 10 MHz).
++ *             0x11c020fc (IPCLK), 0x11c02100 (PCLK). Mux 1 (400 MHz) / 16: SPI at ipclk/4 = 6.25 MHz.
+  *   pins      spi_bus gpp2-0..2 function 2; CS gpp2-3 as a GPIO (cs-gpio, the STM driver drives it);
+  *             IRQ gpa1-2 (active low), read as level. GPIO_PERIC2 0x11c30000 (gpp2 at +0x40),
+  *             GPIO_ALIVE 0x15850000 (gpa1 at +0x20).
+@@ -270,8 +269,19 @@
+ 	    rd(cmu, CMU_QCH_USI06));
+ 	/* boot 13: gates forced on and still no SPI clock (TX FIFO never drains): request it on the Q-channel */
+ 	wr(cmu, CMU_QCH_USI06, rd(cmu, CMU_QCH_USI06) | QCH_CLOCK_REQ);
+-	wr(cmu, CMU_MUX_USI06, rd(cmu, CMU_MUX_USI06) & ~0x3u);
+-	wr(cmu, CMU_DIV_USI06, rd(cmu, CMU_DIV_USI06) & ~0x7fu);
++	/*
++	 * cmucal LUT: mux 1 (IP0_USER) / 1 = 400 MHz, as S-Boot leaves it; Linux sets ipclk = 4 x SPI speed.
++	 * Boots 13-15 had mux 0 (OSCCLK) and the SPI never clocked. Keep mux 1, divide by 16: 25 MHz ipclk,
++	 * 6.25 MHz SPI (DT spi-max-frequency 10 MHz).
++	 */
++	wr(cmu, CMU_MUX_USI06, (rd(cmu, CMU_MUX_USI06) & ~0x3u) | 1);
++	for (int i = 0; (rd(cmu, CMU_MUX_USI06) & (1u << 16)) && i < 1000; i++) {
++		delay(1);
++	}
++	wr(cmu, CMU_DIV_USI06, (rd(cmu, CMU_DIV_USI06) & ~0x7fu) | 15);
++	for (int i = 0; (rd(cmu, CMU_DIV_USI06) & (1u << 16)) && i < 1000; i++) {
++		delay(1);
++	}
+ 	wr(cmu, CMU_GAT_RSTN, rd(cmu, CMU_GAT_RSTN) | GAT_MANUAL | GAT_CG_VAL);
+ 	wr(cmu, CMU_GAT_IPCLK, rd(cmu, CMU_GAT_IPCLK) | GAT_MANUAL | GAT_CG_VAL);
+ 	wr(cmu, CMU_GAT_PCLK, rd(cmu, CMU_GAT_PCLK) | GAT_MANUAL | GAT_CG_VAL);
