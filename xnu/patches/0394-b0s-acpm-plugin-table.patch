@@ -1,0 +1,77 @@
+diff --git a/bsd/dev/b0s_gpu.c b/bsd/dev/b0s_gpu.c
+index 3f4e2bc..b6bd03c 100644
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -131,6 +131,64 @@ acpm_dump(void)
+ 	}
+ }
+ 
++/*
++ * ACPM's plugin table, read-only. Samsung's kernel (acpm.c plugins_init) loads every plugin with
++ * is_attached == 0 && stay_attached == 1 from a firmware file into SRAM and attaches it over IPC; XNU
++ * never did. If the DVFS plugin is one of those, ch 5 is a placeholder (type buffer, q_len 1: boot 29).
++ * struct plugin's tail (after timer_desc) isn't pinned down yet, so this dumps raw words per entry and
++ * prints any word that points at a printable string in SRAM (the fw_name).
++ */
++static void
++acpm_dump_plugins(void)
++{
++	uint32_t base = rd(sram, ACPM_INITDATA + 0), num = rd(sram, ACPM_INITDATA + 4);
++	printf("B0S GPU: ACPM plugins at 0x%x, %u entries\n", base, num);
++	if (num == 0 || num > 32 || !sram_ok(base, num * 64)) {
++		return;
++	}
++	/* stride guess: find the next entry whose first word is id+1 */
++	uint32_t stride = 0;
++	for (uint32_t s = 32; s <= 96; s += 4) {
++		if (num > 1 && rd(sram, base + s) == rd(sram, base) + 1) {
++			stride = s;
++			break;
++		}
++	}
++	printf("B0S GPU: ACPM plugin stride %u\n", stride);
++	uint32_t st = stride ? stride : 64;
++	for (uint32_t i = 0; i < num && sram_ok(base + i * st, st); i++) {
++		uint32_t e = base + i * st;
++		printf("B0S GPU: ACPM plugin[%u] @0x%x:", i, e);
++		for (uint32_t o = 0; o < st; o += 4) {
++			printf(" %08x", rd(sram, e + o));
++		}
++		printf("\n");
++		for (uint32_t o = 0; o < st; o += 4) {
++			uint32_t p = rd(sram, e + o);
++			if (p < 0x100 || !sram_ok(p, 32)) {
++				continue;
++			}
++			char name[33];
++			int n = 0;
++			for (; n < 32; n++) {
++				char ch = (char)(rd(sram, p + (n & ~3)) >> (8 * (n & 3)));
++				if (ch == 0) {
++					break;
++				}
++				if (ch < 0x20 || ch > 0x7e) {
++					n = -1;
++					break;
++				}
++				name[n] = ch;
++			}
++			if (n >= 4) {
++				name[n] = 0;
++				printf("B0S GPU: ACPM plugin[%u] +%u -> \"%s\"\n", i, o, name);
++			}
++		}
++	}
++}
++
+ static int
+ acpm_send(unsigned ch, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3, uint32_t reply[4])
+ {
+@@ -273,6 +331,7 @@ b0s_gpu_init(void)
+ 	 */
+ 	step("ACPM DVFS G3D");
+ 	acpm_dump();
++	acpm_dump_plugins();
+ 	uint32_t rep[4] = { 0 };
+ 	int e = acpm_send(ACPM_CH_DVFS, DVFS_ID_G3D, G3D_RATE_KHZ, 0 /* FREQ_REQ */, 0, rep);
+ 	printf("B0S GPU: DVFS reply %d: %08x %08x %08x %08x; PLL_G3D 0x%x 0x%x\n", e, rep[0], rep[1], rep[2], rep[3],
