@@ -1,0 +1,148 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -112,6 +112,7 @@
+ bsd/dev/sweet_touch.c			standard
+ bsd/dev/taimen_touch.c			standard
+ bsd/dev/b0s_touch.c			standard
++bsd/dev/b0s_gpu.c			standard
+ bsd/dev/taimen_i2c.c			standard
+ bsd/dev/taimen_tas2557.c		standard
+ bsd/dev/taimen_haptic.c			standard
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -834,6 +834,8 @@
+ 		printf("SWEET UFS: b0s: no MSM8998 drivers (touch, keys, haptics, perf, GPU, modem, audio, sensors, USB)\n");
+ 		extern void b0s_touch_init(void);       /* bsd/dev/b0s_touch.c, xnu 0378 */
+ 		b0s_touch_init();
++		extern void b0s_gpu_init(void);         /* bsd/dev/b0s_gpu.c, xnu 0388: b0sgpu=1 */
++		b0s_gpu_init();
+ 		return 0;
+ 	}
+ 	/* retargeted to MSM8998 so far: touch (taimen_touch.c, docs/taimen-touch-plan.md) */
+--- /dev/null
++++ b/bsd/dev/b0s_gpu.c
+@@ -0,0 +1,124 @@
++/*
++ * Galaxy S22 Ultra (b0s, Exynos 2200) GPU, phase 1: power the Xclipse 920 (sgpu, VANGOGH_LITE, gfx 10.3)
++ * up and read its identity. Boot-arg b0sgpu=1 (off by default: it switches the GPU rail on).
++ *
++ * Power-on is Samsung's PD_G3DCORE sequence for EVT1.1+ silicon (cal-if/s5e9925/pmucal
++ * flexpmu_cal_local_s5e9925.h g3dcore_on_evt1_1, picked by cal_data.c for main_rev && sub_rev; this phone
++ * is EVT 1.2), replayed step by step with the pmucal_rae.c semantics:
++ *   SET_BIT_ATOMIC  write value to base + (offset | 0xc000)
++ *   COND_WRITE      if (cond_reg & cond_mask) == cond_value: reg = (reg & ~mask) | value
++ *   WAIT            until (reg & mask) == value
++ *   DELAY           udelay(value)
++ * then vangogh_lite_gc_set_sysregs (sysreg + 0x8 = 6, MGCG). Register windows from the live FDT sgpu node:
++ * rmmio 0x16e00000 (1 MiB), BG3D_PWRCTL 0x16cd0000, sysreg 0x16c00000. GC registers are
++ * rmmio + 4 * (GC_BASE segment + offset), GC_BASE = { 0x1260, 0xa000 } (vangogh_lite_ip_offset.h).
++ */
++#if defined(ARM64_BOARD_CONFIG_TAIMEN)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++
++extern int sweet_is_b0s(void);          /* SweetPlatformExpert.cpp, xnu 0370 */
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++void b0s_gpu_init(void);
++
++#define PMU_ALIVE       0x15860000UL
++#define CMU_G3D         0x16c30000UL
++#define G3D_DD          0x16c60000UL    /* dd_dump_config at +0x700 */
++#define G3D_STRMUX      0x16c80000UL
++#define BG3D_PWRCTL     0x16cd0000UL
++#define G3D_SYSREG      0x16c00000UL
++#define GPU_RMMIO       0x16e00000UL
++
++#define PWRCTL_CTL2     0x4
++#define PWRCTL_STATUS   0x8
++
++#define GC0(reg)        (4u * (0x1260u + (reg)))
++#define GC1(reg)        (4u * (0xa000u + (reg)))
++#define mmGRBM_CNTL                     0x0da0
++#define mmGRBM_STATUS                   0x0da4
++#define mmGRBM_STATUS2                  0x0da2
++#define mmGRBM_CHIP_REVISION            0x0dc1
++#define mmCC_GC_SHADER_ARRAY_CONFIG     0x100f
++#define mmRLC_SAFE_MODE                 0x4ca0  /* segment 1 */
++
++static vm_offset_t pmu, cmu, dd, strmux, pwr, sysreg, rmmio;
++
++static inline uint32_t rd(vm_offset_t b, uint32_t o) { return *(volatile uint32_t *)(b + o); }
++static inline void wr(vm_offset_t b, uint32_t o, uint32_t v) { *(volatile uint32_t *)(b + o) = v; __builtin_arm_dsb(0xf); }
++static inline void rmw(vm_offset_t b, uint32_t o, uint32_t mask, uint32_t val) { wr(b, o, (rd(b, o) & ~mask) | val); }
++
++static bool
++waitfor(const char *name, vm_offset_t b, uint32_t o, uint32_t mask, uint32_t val)
++{
++	for (int i = 0; i < 100000; i++) {
++		if ((rd(b, o) & mask) == val) {
++			return true;
++		}
++		delay(1);
++	}
++	printf("B0S GPU: timeout waiting for %s (reg 0x%x, mask 0x%x, want 0x%x)\n", name, rd(b, o), mask, val);
++	return false;
++}
++
++static bool
++g3dcore_on_evt1_1(void)
++{
++	rmw(cmu, 0x100, 1u << 4, 0);                    /* PLL_CON0_PLL_G3D */
++	wr(cmu, 0x104, 0x38000002);                     /* PLL_CON1_PLL_G3D */
++	wr(pmu, 0x3ef0 | 0xc000, 0xa);                  /* PMU_ALIVE/V_PWREN, set-bit atomic */
++	if (!waitfor("VGPIO_TX_MONITOR", pmu, 0x0a10, 1u << 7, 1u << 7)) {
++		return false;
++	}
++	delay(0x3c);
++	if ((rd(pwr, PWRCTL_CTL2) & (1u << 5)) == 0) {
++		rmw(pwr, PWRCTL_CTL2, 0x3f, 0x12);
++	}
++	if ((rd(pwr, PWRCTL_CTL2) & (1u << 5)) == (1u << 5)) {
++		rmw(pwr, PWRCTL_CTL2, 0x3f, 0x2a);
++	}
++	if (!waitfor("BG3D_PWRCTL_STATUS", pwr, PWRCTL_STATUS, 1u << 1, 1u << 1)) {
++		return false;
++	}
++	rmw(dd, 0x700, 1, 1);                           /* dd_dump_config */
++	rmw(strmux, 0x0, 1, 1);                         /* STR_MUX_CTRL_CORE */
++	rmw(cmu, 0x860, 1, 1);                          /* G3D_HCHGEN_CLKMUX_CORE */
++	return true;
++}
++
++void
++b0s_gpu_init(void)
++{
++	int on = 0;
++	if (!sweet_is_b0s() || !PE_parse_boot_argn("b0sgpu", &on, sizeof(on)) || on <= 0) {
++		return;
++	}
++	pmu = ml_io_map(PMU_ALIVE, 0x10000);
++	cmu = ml_io_map(CMU_G3D, 0x1000);
++	dd = ml_io_map(G3D_DD, 0x1000);
++	strmux = ml_io_map(G3D_STRMUX, 0x1000);
++	pwr = ml_io_map(BG3D_PWRCTL, 0x1000);
++	sysreg = ml_io_map(G3D_SYSREG, 0x1000);
++	rmmio = ml_io_map(GPU_RMMIO, 0x100000);
++	if (!pmu || !cmu || !dd || !strmux || !pwr || !sysreg || !rmmio) {
++		printf("B0S GPU: mapping failed\n");
++		return;
++	}
++	printf("B0S GPU: before: G3DCORE_STATUS 0x%x V_PWREN 0x%x VGPIO_TX 0x%x PWRCTL ctl1 0x%x ctl2 0x%x status 0x%x, PLL_G3D 0x%x 0x%x\n",
++	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pmu, 0x0a10), rd(pwr, 0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS),
++	    rd(cmu, 0x100), rd(cmu, 0x104));
++	bool ok = (rd(pwr, PWRCTL_STATUS) & (1u << 1)) || g3dcore_on_evt1_1();
++	printf("B0S GPU: power-on %s: G3DCORE_STATUS 0x%x V_PWREN 0x%x PWRCTL ctl2 0x%x status 0x%x\n", ok ? "done" : "FAILED",
++	    rd(pmu, 0x2284), rd(pmu, 0x3ef0), rd(pwr, PWRCTL_CTL2), rd(pwr, PWRCTL_STATUS));
++	if (!ok) {
++		return;
++	}
++	wr(sysreg, 0x8, 0x6);                           /* vangogh_lite_gc_set_sysregs: MGCG */
++	printf("B0S GPU: GRBM_STATUS 0x%08x STATUS2 0x%08x CNTL 0x%08x CHIP_REVISION 0x%08x SHADER_ARRAY_CONFIG 0x%08x RLC_SAFE_MODE 0x%08x\n",
++	    rd(rmmio, GC0(mmGRBM_STATUS)), rd(rmmio, GC0(mmGRBM_STATUS2)), rd(rmmio, GC0(mmGRBM_CNTL)),
++	    rd(rmmio, GC0(mmGRBM_CHIP_REVISION)), rd(rmmio, GC0(mmCC_GC_SHADER_ARRAY_CONFIG)), rd(rmmio, GC1(mmRLC_SAFE_MODE)));
++}
++#endif /* ARM64_BOARD_CONFIG_TAIMEN */
