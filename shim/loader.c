@@ -173,7 +173,11 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 	ba->Video.v_display = 1;
 	ba->Video.v_rowBytes = FB_STRIDE;
 	ba->Video.v_width = FB_W;
+#ifdef B0S_GUI_H
+	ba->Video.v_height = B0S_GUI_H;	/* GUI rows: 3084 / 3 = 1028 points (the console still uses all 3088) */
+#else
 	ba->Video.v_height = FB_H;
+#endif
 	ba->Video.v_depth = FB_BPP * 8;
 	ba->deviceTreeP = adt_pa - pa_of_va_base;	/* xnu reads it with the MMU on: a VA */
 	ba->deviceTreeLength = (uint32_t)p->adt_size;

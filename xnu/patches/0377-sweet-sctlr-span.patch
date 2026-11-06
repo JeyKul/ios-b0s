@@ -1,0 +1,28 @@
+--- a/osfmk/arm64/proc_reg.h
++++ b/osfmk/arm64/proc_reg.h
+@@ -651,12 +651,24 @@
+ #define SCTLR_JOP_KEYS_DEFAULT  0
+ #endif
+ 
++/*
++ * SWEET (0377): SPAN = 1. Without __ARM_PAN_AVAILABLE__ nothing clears PSTATE.PAN, and on an
++ * ARMv8.1+ core (b0s: Cortex-A510/A710/X2) SPAN = 0 sets it on every exception to EL1, so
++ * copyin/copyout fault forever (boot 10: launchd stuck in its first vm_allocate trap).
++ * Bit 23 is RES1 on ARMv8.0, so this is right for the Kryo phones too.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET) && !defined(__ARM_PAN_AVAILABLE__)
++#define SCTLR_SPAN_DEFAULT      SCTLR_PAN_UNCHANGED
++#else
++#define SCTLR_SPAN_DEFAULT      0
++#endif
++
+ #define SCTLR_EL1_DEFAULT \
+ 	(SCTLR_RESERVED | SCTLR_UCI_ENABLED | SCTLR_nTWE_WFE_ENABLED | SCTLR_DZE_ENABLED | \
+ 	 SCTLR_I_ENABLED | SCTLR_SED_DISABLED | SCTLR_CP15BEN_ENABLED |                    \
+ 	 SCTLR_SA0_ENABLED | SCTLR_SA_ENABLED | SCTLR_C_ENABLED | SCTLR_M_ENABLED |        \
+ 	 SCTLR_CSEH_DEFAULT | SCTLR_DSSBS_DEFAULT |                                        \
+-	 SCTLR_ROP_KEYS_DEFAULT | SCTLR_JOP_KEYS_DEFAULT)
++	 SCTLR_ROP_KEYS_DEFAULT | SCTLR_JOP_KEYS_DEFAULT | SCTLR_SPAN_DEFAULT)
+ 
+ /*
+  * Coprocessor Access Control Register (CPACR)

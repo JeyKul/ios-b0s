@@ -6,6 +6,7 @@
 #define FB_W		1440
 #define FB_H		3088
 #define FB_BPP		4		/* ARGB8888 as uniLoader g0s */
+#define B0S_GUI_H	3084		/* AppleCLCD / iOS canvas height, a multiple of 3 */
 #elif defined(GTS4L)
 #define FB_BASE		0x9d400000UL	/* reserved-memory splash_region; fb0: 2560x1600, stride 10240 */
 #define FB_W		2560
