@@ -1,0 +1,95 @@
+diff --git a/bsd/dev/b0s_gpu.c b/bsd/dev/b0s_gpu.c
+index a40d0ab..b7dd9ad 100644
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -96,48 +96,74 @@ waitfor(const char *name, vm_offset_t b, uint32_t o, uint32_t mask, uint32_t val
+ #define CH_INFO         16
+ enum { RX_REAR = 0, RX_FRONT = 4, RX_BASE = 8, TX_REAR = 24, TX_FRONT = 28, TX_BASE = 32, Q_LEN = 36, Q_ELEM = 40 };
+ 
+-/* One request on channel ch, polled reply: the AP sends on the channel's rx_* queue, APM answers on tx_*. */
++/*
++ * One request on channel ch, polled reply: the AP sends on the channel's rx_* queue, APM answers on tx_*.
++ * channel_info's rear/front/base are SRAM *offsets* (acpm_ipc.c: ch.rear = base + readl(&info.q_rear)), not
++ * values: boot 27 printed rx f/r 62220/62216 = 0xf30c/0xf308, right before rx base 0xf310. 0391 used them as
++ * indices and wrote ~1 MiB past the 0x50000 SRAM mapping (the freeze after "ACPM ch 5"). Queue indices are
++ * the words at those offsets.
++ */
++static inline bool
++sram_ok(uint32_t off, uint32_t len)
++{
++	return off < 0x50000 && len <= 0x50000 - off;
++}
++
+ static int
+ acpm_send(unsigned ch, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3, uint32_t reply[4])
+ {
+ 	uint32_t chans = rd(sram, ACPM_INITDATA + 8), ap_max = rd(sram, ACPM_INITDATA + 24);
+-	if (ch >= ap_max || chans >= 0x50000) {
++	if (ch >= ap_max || !sram_ok(chans, (ch + 1) * IPC_CH_SIZE)) {
+ 		printf("B0S GPU: ACPM initdata odd: ipc_channels 0x%x ipc_ap_max %u\n", chans, ap_max);
+ 		return EINVAL;
+ 	}
+ 	uint32_t c = chans + ch * IPC_CH_SIZE, ci = c + CH_INFO;
+ 	uint32_t id = rd(sram, c), len = rd(sram, ci + Q_LEN), size = rd(sram, ci + Q_ELEM);
+-	uint32_t txb = rd(sram, ci + RX_BASE), rxb = rd(sram, ci + TX_BASE);
+-	printf("B0S GPU: ACPM ch %u: id %u q_len %u elem %u poll %u, tx base 0x%x f/r %u/%u, rx base 0x%x f/r %u/%u\n",
+-	    ch, id, len, size, rd(sram, ci + 52), txb, rd(sram, ci + RX_FRONT), rd(sram, ci + RX_REAR),
+-	    rxb, rd(sram, ci + TX_FRONT), rd(sram, ci + TX_REAR));
+-	if (id != ch || len == 0 || len > 64 || size < 16 || size > 64 || txb >= 0x50000 || rxb >= 0x50000) {
++	/* offsets of the queue words and buffers */
++	uint32_t o_rx_rear = rd(sram, ci + RX_REAR), o_rx_front = rd(sram, ci + RX_FRONT), o_rx_base = rd(sram, ci + RX_BASE);
++	uint32_t o_tx_rear = rd(sram, ci + TX_REAR), o_tx_front = rd(sram, ci + TX_FRONT), o_tx_base = rd(sram, ci + TX_BASE);
++	printf("B0S GPU: ACPM ch %u: id %u q_len %u elem %u poll %u; rx @rear 0x%x @front 0x%x base 0x%x; tx @rear 0x%x @front 0x%x base 0x%x\n",
++	    ch, id, len, size, rd(sram, ci + 52), o_rx_rear, o_rx_front, o_rx_base, o_tx_rear, o_tx_front, o_tx_base);
++	if (id != ch || len == 0 || len > 64 || size < 16 || size > 64 ||
++	    !sram_ok(o_rx_rear, 4) || !sram_ok(o_rx_front, 4) || !sram_ok(o_tx_rear, 4) || !sram_ok(o_tx_front, 4) ||
++	    !sram_ok(o_rx_base, len * size) || !sram_ok(o_tx_base, len * size)) {
++		printf("B0S GPU: ACPM ch %u: layout out of range, not sending\n", ch);
++		return EINVAL;
++	}
++	uint32_t front = rd(sram, o_rx_front), rear = rd(sram, o_rx_rear);
++	printf("B0S GPU: ACPM ch %u: rx front %u rear %u, tx front %u rear %u\n", ch, front, rear,
++	    rd(sram, o_tx_front), rd(sram, o_tx_rear));
++	if (front >= len || rear >= len) {
++		printf("B0S GPU: ACPM ch %u: index out of range, not sending\n", ch);
+ 		return EINVAL;
+ 	}
+-	uint32_t front = rd(sram, ci + RX_FRONT), next = (front + 1) % len;
+-	if (next == rd(sram, ci + RX_REAR)) {
++	uint32_t next = (front + 1) % len;
++	if (len > 1 && next == rear) {
+ 		printf("B0S GPU: ACPM ch %u queue full\n", ch);
+ 		return EBUSY;
+ 	}
+ 	uint32_t seq = 1;
+ 	uint32_t cmd[4] = { (c0 & ~(0x3fu << 16)) | (seq << 16), c1, c2, c3 };
+ 	for (uint32_t o = 0; o < size; o += 4) {
+-		wr(sram, txb + size * front + o, o < 16 ? cmd[o / 4] : 0);
++		wr(sram, o_rx_base + size * front + o, o < 16 ? cmd[o / 4] : 0);
+ 	}
+-	wr(sram, ci + RX_FRONT, next);
++	wr(sram, o_rx_front, next);
++	step("ACPM doorbell");
+ 	wr(mbox, ACPM_INTGR0, (1u << ch) << 16);
++	uint32_t txr0 = rd(sram, o_tx_rear);
+ 	for (int t = 0; t < 100000; t++) {
+-		uint32_t r = rd(sram, ci + TX_REAR), f = rd(sram, ci + TX_FRONT);
+-		if (r != f) {
++		uint32_t r = rd(sram, o_tx_rear), f = rd(sram, o_tx_front);
++		if (r != f && r < len) {
+ 			for (int k = 0; k < 4; k++) {
+-				reply[k] = rd(sram, rxb + size * r + 4 * k);
++				reply[k] = rd(sram, o_tx_base + size * r + 4 * k);
+ 			}
+-			wr(sram, ci + TX_REAR, (r + 1) % len);
++			wr(sram, o_tx_rear, (r + 1) % len);
+ 			return 0;
+ 		}
+ 		delay(1);
+ 	}
+-	printf("B0S GPU: ACPM ch %u: no reply in 100 ms\n", ch);
++	printf("B0S GPU: ACPM ch %u: no reply in 100 ms (tx rear %u -> %u, front %u)\n", ch, txr0,
++	    rd(sram, o_tx_rear), rd(sram, o_tx_front));
+ 	return ETIMEDOUT;
+ }
+ 
