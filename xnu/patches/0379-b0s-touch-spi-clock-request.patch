@@ -1,0 +1,54 @@
+--- a/bsd/dev/b0s_touch.c
++++ b/bsd/dev/b0s_touch.c
+@@ -54,6 +54,8 @@
+ #define CMU_GAT_PCLK    0x2100
+ #define GAT_MANUAL      (1u << 20)
+ #define GAT_CG_VAL      (1u << 21)
++#define CMU_QCH_USI06   0x3098          /* QCH_CON_USI06_USI_OIS_QCH: ENABLE 0, CLOCK_REQ 1, IGNORE_FORCE_PM_EN 2 */
++#define QCH_CLOCK_REQ   (1u << 1)
+ 
+ #define SYSREG_USI      0x11c22000UL
+ #define SYSREG_USI_OFF  0x10
+@@ -258,13 +260,19 @@
+ b0st_hw_setup(void)
+ {
+ 	/* clock: OSCCLK, divider 1, gates forced on */
+-	printf("B0S TOUCH: CMU mux 0x%x div 0x%x gates 0x%x 0x%x 0x%x\n", rd(cmu, CMU_MUX_USI06),
+-	    rd(cmu, CMU_DIV_USI06), rd(cmu, CMU_GAT_RSTN), rd(cmu, CMU_GAT_IPCLK), rd(cmu, CMU_GAT_PCLK));
++	printf("B0S TOUCH: CMU mux 0x%x div 0x%x gates 0x%x 0x%x 0x%x qch 0x%x\n", rd(cmu, CMU_MUX_USI06),
++	    rd(cmu, CMU_DIV_USI06), rd(cmu, CMU_GAT_RSTN), rd(cmu, CMU_GAT_IPCLK), rd(cmu, CMU_GAT_PCLK),
++	    rd(cmu, CMU_QCH_USI06));
++	/* boot 13: gates forced on and still no SPI clock (TX FIFO never drains): request it on the Q-channel */
++	wr(cmu, CMU_QCH_USI06, rd(cmu, CMU_QCH_USI06) | QCH_CLOCK_REQ);
+ 	wr(cmu, CMU_MUX_USI06, rd(cmu, CMU_MUX_USI06) & ~0x3u);
+ 	wr(cmu, CMU_DIV_USI06, rd(cmu, CMU_DIV_USI06) & ~0x7fu);
+ 	wr(cmu, CMU_GAT_RSTN, rd(cmu, CMU_GAT_RSTN) | GAT_MANUAL | GAT_CG_VAL);
+ 	wr(cmu, CMU_GAT_IPCLK, rd(cmu, CMU_GAT_IPCLK) | GAT_MANUAL | GAT_CG_VAL);
+ 	wr(cmu, CMU_GAT_PCLK, rd(cmu, CMU_GAT_PCLK) | GAT_MANUAL | GAT_CG_VAL);
++	printf("B0S TOUCH: CMU now mux 0x%x div 0x%x gates 0x%x 0x%x 0x%x qch 0x%x\n", rd(cmu, CMU_MUX_USI06),
++	    rd(cmu, CMU_DIV_USI06), rd(cmu, CMU_GAT_RSTN), rd(cmu, CMU_GAT_IPCLK), rd(cmu, CMU_GAT_PCLK),
++	    rd(cmu, CMU_QCH_USI06));
+ 	/* USI in SPI mode */
+ 	wr(sysreg, SYSREG_USI_OFF, (rd(sysreg, SYSREG_USI_OFF) & ~0x7u) | USI_SPI_SW_CONF);
+ 	/* pins: gpp2-0..2 SPI (function 2), gpp2-3 output high (CS idle), no pulls */
+@@ -275,7 +283,7 @@
+ 	wr(gpio_p2, GPP2 + 8, rd(gpio_p2, GPP2 + 8) & ~0xffffu);
+ 	/* controller: USI out of reset, nCS control, then s3c64xx_spi_hwinit */
+ 	wr(spi, USI_CON, 0);
+-	wr(spi, USI_OPTION, rd(spi, USI_OPTION) | (1u << 5));
++	wr(spi, USI_OPTION, rd(spi, USI_OPTION) | (1u << 5) | (1u << 1));    /* NCS control, HWACG CLKREQ_ON */
+ 	wr(spi, SPI_SLAVE_SEL, 1);              /* SIG_INACT: CS is the GPIO */
+ 	wr(spi, SPI_INT_EN, 0);
+ 	wr(spi, SPI_MODE_CFG, 0);
+@@ -284,8 +292,9 @@
+ 	wr(spi, SPI_PENDING_CLR, 0);
+ 	wr(spi, SPI_SWAP_CFG, 0);
+ 	wr(spi, SPI_CH_CFG, 0);                 /* master, mode 0 */
+-	printf("B0S TOUCH: USI sysreg 0x%x, gpp2 con 0x%x, spi status 0x%x, irq %s\n",
+-	    rd(sysreg, SYSREG_USI_OFF), rd(gpio_p2, GPP2), rd(spi, SPI_STATUS), b0st_irq_low() ? "low" : "high");
++	printf("B0S TOUCH: USI sysreg 0x%x con 0x%x option 0x%x, gpp2 con 0x%x, spi status 0x%x, irq %s\n",
++	    rd(sysreg, SYSREG_USI_OFF), rd(spi, USI_CON), rd(spi, USI_OPTION), rd(gpio_p2, GPP2), rd(spi, SPI_STATUS),
++	    b0st_irq_low() ? "low" : "high");
+ }
+ 
+ static int
