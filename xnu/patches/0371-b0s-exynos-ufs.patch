@@ -1,0 +1,112 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -103,7 +103,7 @@
+ /* Layout of the contiguous DMA allocation. */
+ #define DMA_UTRL        0x0000                  /* 1 KiB aligned */
+ #define DMA_UCD         0x1000                  /* 128 byte aligned */
+-#define DMA_BOUNCE      0x4000
++#define DMA_BOUNCE      0x10000                 /* b0s: 256 PRDT entries of 128 bytes behind the UCD */
+ #define DMA_SIZE        (DMA_BOUNCE + BOUNCE_SIZE)
+ 
+ static struct {
+@@ -153,6 +153,45 @@
+  * One SCSI command in slot 0, data (if any) to/from the bounce buffer
+  * (to the device when write is set). Returns 0 or an errno.
+  */
++/*
++ * Galaxy S22 Ultra (b0s=1, Exynos 2200 UFS, drivers/scsi/ufs/ufs-exynos*.c): the host takes
++ * 128-byte PRDT entries (FMP descriptor type 3, set through the secure monitor as Linux does;
++ * crypto fields zero = plain data) of at most 4 KiB each (HCI_TXPRDT_ENTRY_SIZE 12).
++ */
++extern int sweet_is_b0s(void);          /* iokit/Kernel/arm/SweetPlatformExpert.cpp, xnu 0370 */
++#define B0S_VS_HCI              0x1100  /* vendor HCI registers, from the UFS base */
++#define B0S_TXPRDT_ENTRY_SIZE   0x00
++#define B0S_RXPRDT_ENTRY_SIZE   0x04
++#define B0S_PRDT_STRIDE         128u
++#define B0S_PRDT_CHUNK          4096u
++
++static uint64_t
++b0s_smc(uint64_t cmd, uint64_t a0, uint64_t a1, uint64_t a2)
++{
++	register uint64_t x0 __asm__("x0") = cmd;
++	register uint64_t x1 __asm__("x1") = a0;
++	register uint64_t x2 __asm__("x2") = a1;
++	register uint64_t x3 __asm__("x3") = a2;
++	__asm__ volatile ("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) : :
++	    "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
++	    "x16", "x17", "memory");
++	return x0;
++}
++
++static void
++b0s_ufs_setup(void)
++{
++	/* exynos-smc.h: SMC_CMD_SMU(SMU_INIT, FMP_EMBEDDED), SMC_CMD_FMP_SECURITY(0, FMP_EMBEDDED, DESCTYPE_3) */
++	uint64_t r1 = b0s_smc(0x82001850ULL, 0, 0, 0);
++	uint64_t r2 = b0s_smc(0x8C2001810ULL, 0, 0, 3);
++	uint32_t tx = ufs_rd(B0S_VS_HCI + B0S_TXPRDT_ENTRY_SIZE), rx = ufs_rd(B0S_VS_HCI + B0S_RXPRDT_ENTRY_SIZE);
++	ufs_wr(B0S_VS_HCI + B0S_TXPRDT_ENTRY_SIZE, (1u << 31) | 12);   /* PRDT_PREFECT_EN | PRDT_SET_SIZE(12) */
++	ufs_wr(B0S_VS_HCI + B0S_RXPRDT_ENTRY_SIZE, 12);
++	printf("SWEET UFS: b0s: SMU init %llu, FMP desctype 3 %llu, PRDT size tx 0x%x rx 0x%x (were 0x%x 0x%x), cap 0x%x\n",
++	    r1, r2, ufs_rd(B0S_VS_HCI + B0S_TXPRDT_ENTRY_SIZE), ufs_rd(B0S_VS_HCI + B0S_RXPRDT_ENTRY_SIZE),
++	    tx, rx, ufs_rd(REG_CAP));
++}
++
+ static int
+ ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
+ {
+@@ -180,7 +219,20 @@
+ 	utrd->ucdba = (uint32_t)ucd_pa;
+ 	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
+ 	utrd->resp = (512u / 4) << 16 | (512u / 4);
+-	if (len) {
++	uint32_t prdt_bytes = 0;
++	if (len && sweet_is_b0s()) {
++		uint32_t n = 0;
++		for (uint32_t done = 0; done < len; done += B0S_PRDT_CHUNK, n++) {
++			uint32_t chunk = MIN(B0S_PRDT_CHUNK, len - done);
++			uint32_t *e = (uint32_t *)((uintptr_t)ucd->prdt + n * B0S_PRDT_STRIDE);
++			bzero(e, B0S_PRDT_STRIDE);
++			e[0] = (uint32_t)(bounce_pa + done);
++			e[1] = (uint32_t)((bounce_pa + done) >> 32);
++			e[3] = chunk - 1;
++		}
++		utrd->prdt = (1024u / 4) << 16 | n;
++		prdt_bytes = n * B0S_PRDT_STRIDE;
++	} else if (len) {
+ 		uint32_t n = 0;
+ 		for (uint32_t done = 0; done < len; done += PRDT_CHUNK, n++) {
+ 			uint32_t chunk = MIN(PRDT_CHUNK, len - done);
+@@ -189,6 +241,7 @@
+ 			ucd->prdt[n].dbc = chunk - 1;
+ 		}
+ 		utrd->prdt = (1024u / 4) << 16 | n;
++		prdt_bytes = n * sizeof(ucd->prdt[0]);
+ 	}
+ 
+ 	if (su.cache) {
+@@ -196,12 +249,11 @@
+ 		dma_clean(DMA_UCD, 16 + cdb_len);
+ 		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
+ 		if (len) {
+-			dma_clean(DMA_UCD + offsetof(struct ucd, prdt),
+-			    (utrd->prdt & 0xffff) * sizeof(ucd->prdt[0]));
++			dma_clean(DMA_UCD + offsetof(struct ucd, prdt), prdt_bytes);
+ 		}
+ 	} else {
+ 		dma_sync(DMA_UTRL, sizeof(*utrd));
+-		dma_sync(DMA_UCD, sizeof(*ucd));
++		dma_sync(DMA_UCD, offsetof(struct ucd, prdt) + MAX(prdt_bytes, sizeof(ucd->prdt)));
+ 	}
+ 	if (len) {
+ 		if (su.cache && write) {
+@@ -460,6 +512,9 @@
+ 		    su.dma_pa);
+ 		return ENXIO;
+ 	}
++	if (sweet_is_b0s()) {
++		b0s_ufs_setup();
++	}
+ 	ufs_wr(REG_IE, 0);                      /* polled operation */
+ 	ufs_wr(REG_IS, ufs_rd(REG_IS));
+ 	ufs_wr(REG_UTRLRSR, 0);
