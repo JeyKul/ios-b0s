@@ -1,0 +1,205 @@
+name: xnu-mini
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos_version:
+        description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
+        default: "13.5"
+      kernel_config:
+        description: RELEASE / DEVELOPMENT / DEBUG
+        default: DEVELOPMENT
+      machine_config:
+        description: xnu MACHINE_CONFIG (TAIMEN = Pixel 2 XL, SWEET = the Pixel 1 / Redmi kernel)
+        default: TAIMEN
+      keep_going:
+        description: make -k (collect all compile errors in one run)
+        default: "true"
+      package_buildtree:
+        description: also upload the build tree for local compiles (slow, rarely needed)
+        default: "false"
+  push:
+    branches: [main, taimen, b0s]
+    paths:
+      - "xnu/patches/**"
+      - ".github/workflows/xnu.yml"
+
+# One group per commit: the next kernel builds while the phone tests the last one (a group per
+# branch with cancel-in-progress cancelled a running build at every push). tools/windows/
+# ci-kernel.sh waits for the run of a given commit, so parallel runs are fine.
+concurrency:
+  group: xnu-mini-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  DXB_REPO: https://github.com/blacktop/darwin-xnu-build
+  DXB_SHA: 663906528d1cd5ea8fde7de6f16de73db9511549
+  MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
+  KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
+  MACHINE_CONFIG: ${{ inputs.machine_config || 'TAIMEN' }}
+  # Bump to throw away every cache below (sources, built deps, ccache).
+  CACHE_SALT: v1
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+jobs:
+  build:
+    # macos-15 (macos-14 is retired on 2026-11-02): Xcode 16's iig reads IORPC.kernelContent, which
+    # patch 0357 gives xnu-8796 (93686a2 had kept this on macos-14's Xcode 15 for it)
+    # Self-hosted on Dylan's Mac mini (M1, 8 cores), user ghrunner, Xcode 27 via xcode-select.
+    runs-on: [self-hosted, ios-b0s]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch build script
+        run: |
+          git init -q dxb
+          git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
+          git -C dxb checkout -q FETCH_HEAD
+          # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
+          cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
+          # libfirehose_kernel is built arm64e-only with Xcode's default CPU (LSE atomics).
+          # Our kernels are plain arm64 on ARMv8.0 cores (Pixel 1 Kryo, Pixel 2 XL Kryo 280):
+          # build it arm64-only with -mcpu=kryo, as tools/xnu-build-local.sh does. (TAIMEN boot 2
+          # panicked on an LDADD in __firehose_buffer_tracepoint_flush.)
+          sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS='"'"'$(inherited) -mcpu=kryo'"'"'/' dxb/build.sh
+          grep -c "OTHER_CFLAGS='\$(inherited) -mcpu=kryo'" dxb/build.sh
+          # Shallow clones: the Apple source tags are all we ever check out
+          sed -i '' 's/git clone --branch/git clone --depth 1 --branch/' dxb/build.sh
+          grep -c 'git clone --depth 1 --branch' dxb/build.sh
+          # xnu's makedefs run the kernel compiler as "$(CCACHE) $(CC)"; build.sh exports its own
+          # CC, so hand ccache over through that make variable on the kernel make line.
+          sed -i '' 's/make install -j8 VERBOSE=YES/make install -j8 VERBOSE=YES CCACHE=ccache/' dxb/build.sh
+          grep -c 'VERBOSE=YES CCACHE=ccache' dxb/build.sh
+          ls dxb/patches
+
+      - name: Deps (pre-installed on the mini)
+        run: |
+          export PATH="/opt/homebrew/bin:$PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          for t in jq gum cmake ninja ccache; do command -v $t >/dev/null || { echo "missing $t"; exit 1; }; done
+          test -x /usr/local/bin/xcodes
+          sw_vers
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          xcodebuild -version
+          xcrun --find iig
+          echo "XCODE_VER=$(xcodebuild -version | head -1 | tr ' ' '_')" >> "$GITHUB_ENV"
+
+      # --- caches -------------------------------------------------------------
+      # 1. Apple source clones (xnu, bootstrap_cmds, dtrace, AvailabilityVersions,
+      #    libplatform, libdispatch). build.sh skips the clone when the dir exists;
+      #    "Reset cached trees" below puts them back to pristine before patching.
+      - name: Cache Apple source clones
+        uses: actions/cache@v4
+        with:
+          path: |
+            dxb/xnu
+            dxb/bootstrap_cmds
+            dxb/dtrace
+            dxb/AvailabilityVersions
+            dxb/libplatform
+            dxb/libdispatch
+          key: sources-${{ env.CACHE_SALT }}-${{ env.DXB_SHA }}-${{ env.MACOS_VERSION }}
+
+      # 2. Built dependencies: mig, ctf tools, availability.pl, installed xnu and
+      #    Libsystem headers, libplatform headers, libfirehose_kernel.a. None of
+      #    them depend on our kernel patches, so the key is the toolchain only.
+      #    The Kernels dir is excluded so a failed build can never hand the Collect
+      #    step a stale kernel.
+      - name: Cache built dependencies (fakeroot)
+        uses: actions/cache@v4
+        with:
+          path: |
+            dxb/fakeroot
+            !dxb/fakeroot/System/Library/Kernels
+          key: fakeroot-${{ env.CACHE_SALT }}-kryo1-${{ env.DXB_SHA }}-${{ env.MACOS_VERSION }}-${{ env.XCODE_VER }}
+
+      # 3. ccache for the kernel compile itself. A new entry is saved every run
+      #    (unique key); the newest matching prefix is restored.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ env.CACHE_SALT }}-${{ env.MACOS_VERSION }}-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.CACHE_SALT }}-${{ env.MACOS_VERSION }}-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-
+            ccache-${{ env.CACHE_SALT }}-${{ env.MACOS_VERSION }}-
+
+      - name: Reset cached trees and configure ccache
+        run: |
+          for d in xnu bootstrap_cmds dtrace AvailabilityVersions libplatform libdispatch; do
+            if [ -d "dxb/$d/.git" ]; then
+              git -C "dxb/$d" reset -q --hard
+              git -C "dxb/$d" clean -qfdx
+              echo "reset dxb/$d to $(git -C "dxb/$d" describe --tags --always)"
+            fi
+          done
+          rm -rf dxb/fakeroot/System/Library/Kernels
+          [ -f dxb/fakeroot/.xnu_headers_installed ] && echo "fakeroot: deps cached" || echo "fakeroot: deps will be built"
+          ccache --set-config=max_size=1.5G
+          ccache --set-config=compression=true
+          # sources are checked out fresh each run, so ignore mtimes and let direct mode hit
+          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+          ccache --set-config=base_dir="$GITHUB_WORKSPACE"
+          ccache -z
+          ccache -p | grep -E 'max_size|sloppiness|cache_dir'
+
+      - name: Build
+        working-directory: dxb
+        env:
+          # keep going after errors so one run reports every compile failure
+          MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
+        run: bash build.sh
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Package build tree for local compiles
+        if: inputs.package_buildtree == 'true'
+        run: |
+          # Generated headers, config option headers, mig output and the patched
+          # source: enough to re-run any single compile command from the log locally.
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+          mkdir -p sdk-kernel-platform
+          cp -R "$SDK/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform" sdk-kernel-platform/ || true
+          tar czf buildtree.tgz \
+            --exclude='*.o' --exclude='*.cpo' --exclude='*.a' --exclude='*.dSYM' --exclude='*.unstripped' \
+            --exclude='kernel.development.*' --exclude='.git' \
+            -C dxb build/xnu.obj fakeroot/usr/local/include xnu \
+            -C .. sdk-kernel-platform
+          ls -la buildtree.tgz
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.package_buildtree == 'true'
+        with:
+          name: xnu-buildtree
+          path: buildtree.tgz
+          retention-days: 7
+
+      - name: Inspect closed KDK support libs
+        if: always()
+        run: |
+          mkdir -p out/kdk-libs
+          for lib in /Library/Developer/KDKs/*/System/Library/KernelSupport/lib*.a; do
+            b=$(basename "$lib" .a)
+            ar t "$lib" > "out/kdk-libs/$b.members.txt" 2>&1 || true
+            nm -m "$lib" > "out/kdk-libs/$b.nm.txt" 2>&1 || true
+            lipo -info "$lib" >> out/kdk-libs/arch.txt 2>&1 || true
+          done
+          ls -la out/kdk-libs
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          ls -la out
+          (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-kernel
+          path: out/
+          if-no-files-found: warn
