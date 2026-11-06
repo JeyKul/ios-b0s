@@ -1,0 +1,71 @@
+diff --git a/bsd/dev/b0s_gpu.c b/bsd/dev/b0s_gpu.c
+index b6bd03c..a877a2e 100644
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -141,51 +141,35 @@ acpm_dump(void)
+ static void
+ acpm_dump_plugins(void)
+ {
++	/*
++	 * 0395: boot 30 froze inside the 0394 version (it followed words as pointers into SRAM, parts of which
++	 * are probably secure). Now: one step() per entry, the entry's own words only, no pointer chasing.
++	 */
+ 	uint32_t base = rd(sram, ACPM_INITDATA + 0), num = rd(sram, ACPM_INITDATA + 4);
+ 	printf("B0S GPU: ACPM plugins at 0x%x, %u entries\n", base, num);
+ 	if (num == 0 || num > 32 || !sram_ok(base, num * 64)) {
+ 		return;
+ 	}
+-	/* stride guess: find the next entry whose first word is id+1 */
+-	uint32_t stride = 0;
+-	for (uint32_t s = 32; s <= 96; s += 4) {
+-		if (num > 1 && rd(sram, base + s) == rd(sram, base) + 1) {
++	step("ACPM plugin table, first word");
++	uint32_t id0 = rd(sram, base), stride = 0;
++	for (uint32_t s = 32; s <= 96 && num > 1; s += 4) {
++		if (rd(sram, base + s) == id0 + 1) {
+ 			stride = s;
+ 			break;
+ 		}
+ 	}
+ 	printf("B0S GPU: ACPM plugin stride %u\n", stride);
+-	uint32_t st = stride ? stride : 64;
+-	for (uint32_t i = 0; i < num && sram_ok(base + i * st, st); i++) {
+-		uint32_t e = base + i * st;
++	if (stride == 0) {
++		return;
++	}
++	for (uint32_t i = 0; i < num; i++) {
++		uint32_t e = base + i * stride;
++		step("ACPM plugin entry");
+ 		printf("B0S GPU: ACPM plugin[%u] @0x%x:", i, e);
+-		for (uint32_t o = 0; o < st; o += 4) {
++		for (uint32_t o = 0; o < stride; o += 4) {
+ 			printf(" %08x", rd(sram, e + o));
+ 		}
+ 		printf("\n");
+-		for (uint32_t o = 0; o < st; o += 4) {
+-			uint32_t p = rd(sram, e + o);
+-			if (p < 0x100 || !sram_ok(p, 32)) {
+-				continue;
+-			}
+-			char name[33];
+-			int n = 0;
+-			for (; n < 32; n++) {
+-				char ch = (char)(rd(sram, p + (n & ~3)) >> (8 * (n & 3)));
+-				if (ch == 0) {
+-					break;
+-				}
+-				if (ch < 0x20 || ch > 0x7e) {
+-					n = -1;
+-					break;
+-				}
+-				name[n] = ch;
+-			}
+-			if (n >= 4) {
+-				name[n] = 0;
+-				printf("B0S GPU: ACPM plugin[%u] +%u -> \"%s\"\n", i, o, name);
+-			}
+-		}
+ 	}
+ }
+ 
