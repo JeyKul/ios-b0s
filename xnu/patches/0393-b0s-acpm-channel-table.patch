@@ -1,0 +1,55 @@
+diff --git a/bsd/dev/b0s_gpu.c b/bsd/dev/b0s_gpu.c
+index b7dd9ad..3f4e2bc 100644
+--- a/bsd/dev/b0s_gpu.c
++++ b/bsd/dev/b0s_gpu.c
+@@ -109,6 +109,28 @@ sram_ok(uint32_t off, uint32_t len)
+ 	return off < 0x50000 && len <= 0x50000 - off;
+ }
+ 
++/*
++ * Every AP channel of ACPM's table, one line each: Samsung's acpm_ipc never sends on a channel with q_len 1
++ * ("reserve 2 elements"; a 1-slot queue can't move its front), and boot 28 found ch 5 at q_len 1. This shows
++ * which channels are sendable and what their type says (the ch/buff union depends on it).
++ */
++static void
++acpm_dump(void)
++{
++	uint32_t chans = rd(sram, ACPM_INITDATA + 8), ap_max = rd(sram, ACPM_INITDATA + 24);
++	if (ap_max > 64 || !sram_ok(chans, ap_max * IPC_CH_SIZE)) {
++		printf("B0S GPU: ACPM table odd: ipc_channels 0x%x ipc_ap_max %u\n", chans, ap_max);
++		return;
++	}
++	printf("B0S GPU: ACPM table at 0x%x, %u AP channels\n", chans, ap_max);
++	for (uint32_t i = 0; i < ap_max; i++) {
++		uint32_t c = chans + i * IPC_CH_SIZE, ci = c + CH_INFO;
++		printf("B0S GPU: ACPM[%u] id %u field 0x%x owner 0x%x type 0x%x q_len %u elem %u credit %u mbox 0x%x\n",
++		    i, rd(sram, c), rd(sram, c + 4), rd(sram, c + 8), rd(sram, c + 12),
++		    rd(sram, ci + Q_LEN), rd(sram, ci + Q_ELEM), rd(sram, ci + 44), rd(sram, ci + 48));
++	}
++}
++
+ static int
+ acpm_send(unsigned ch, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3, uint32_t reply[4])
+ {
+@@ -137,8 +159,12 @@ acpm_send(unsigned ch, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3, uint3
+ 		printf("B0S GPU: ACPM ch %u: index out of range, not sending\n", ch);
+ 		return EINVAL;
+ 	}
++	if (len < 3) {
++		printf("B0S GPU: ACPM ch %u: q_len %u, Samsung's acpm_ipc never sends on it (needs >= 3)\n", ch, len);
++		return ENOTSUP;
++	}
+ 	uint32_t next = (front + 1) % len;
+-	if (len > 1 && next == rear) {
++	if (next == rear) {
+ 		printf("B0S GPU: ACPM ch %u queue full\n", ch);
+ 		return EBUSY;
+ 	}
+@@ -246,6 +272,7 @@ b0s_gpu_init(void)
+ 	 * access (sgpu_governor.c:1103 cal_dfs_set_rate): APM sets the rail voltage and PLL_G3D.
+ 	 */
+ 	step("ACPM DVFS G3D");
++	acpm_dump();
+ 	uint32_t rep[4] = { 0 };
+ 	int e = acpm_send(ACPM_CH_DVFS, DVFS_ID_G3D, G3D_RATE_KHZ, 0 /* FREQ_REQ */, 0, rep);
+ 	printf("B0S GPU: DVFS reply %d: %08x %08x %08x %08x; PLL_G3D 0x%x 0x%x\n", e, rep[0], rep[1], rep[2], rep[3],
