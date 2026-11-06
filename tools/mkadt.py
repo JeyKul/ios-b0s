@@ -296,8 +296,9 @@ def build(seed=None, qemu=False, highmem=False, pixel1=False, taimen=False):
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(GTS4L_CANVAS[0] if GTS4L_IPAD else 750 if pixel1 else 1125)),
-            ('canvas-height', u32(GTS4L_CANVAS[1] if GTS4L_IPAD else 1334 if pixel1 else 2436)),
+            # b0s: the panel's 1440 x 3084 (boot video height from the shim, sweetfb_native=1)
+            ('canvas-width', u32(1440 if B0S else GTS4L_CANVAS[0] if GTS4L_IPAD else 750 if pixel1 else 1125)),
+            ('canvas-height', u32(3084 if B0S else GTS4L_CANVAS[1] if GTS4L_IPAD else 1334 if pixel1 else 2436)),
         ])] + ([
         # Wi-Fi (bsd/dev/sailfish_wlan.c, QCA6174 on PCIe): launchd starts
         # wifid only if the tree has a node named wlan; SailfishWLAN (the
