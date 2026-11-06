@@ -14,6 +14,8 @@
 
 #define BOOT_LINE_LENGTH	608
 #define PAGE_16K		0x4000UL
+/* b0s: free high DRAM below XNU's 0x900000000 (sec_rdx_bootdev ends at 0x8bb600000) */
+#define B0S_PAYLOAD_BUF		0x8c0000000UL
 
 struct payload_seg {
 	uint64_t vmaddr, vmsize, file_off, file_size;
@@ -83,6 +85,35 @@ const char *loader_boot(uintptr_t dtb)
 	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
 	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
 		return "no initrd in /chosen";
+#ifdef B0S
+	/*
+	 * S-Boot's initrd is the vendor ramdisk, then ours at whatever byte it ends
+	 * on, then the bootconfig. Find the payload by its magic (byte reads), and
+	 * move it to an aligned buffer with byte copies if it is not 8-aligned.
+	 */
+	uint64_t at = 0;
+	for (uint64_t a = rd_start; a + 8 <= rd_end; a++) {
+		volatile const char *m = (volatile const char *)a;
+		if (m[0] == 'S' && m[1] == 'W' && m[2] == 'E' && m[3] == 'E' &&
+		    m[4] == 'T' && m[5] == 'X' && m[6] == 'N' && m[7] == 'U') {
+			at = a;
+			break;
+		}
+	}
+	if (!at)
+		return "no SWEETXNU in initrd";
+	con_hex2("FOUND", "at=", at, "off=", at - rd_start);
+	if (at & 7) {
+		volatile uint8_t *d = (volatile uint8_t *)B0S_PAYLOAD_BUF;
+		volatile const uint8_t *src = (volatile const uint8_t *)at;
+		for (uint64_t i = 0; i < rd_end - at; i++)
+			d[i] = src[i];
+		rd_end = B0S_PAYLOAD_BUF + (rd_end - at);
+		at = B0S_PAYLOAD_BUF;
+		con_hex2("MOVED", "lo=", at, "hi=", rd_end);
+	}
+	rd_start = at;
+#endif
 	return loader_boot_rd(rd_start, rd_end);
 }
 
