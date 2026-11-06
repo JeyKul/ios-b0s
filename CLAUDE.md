@@ -18,11 +18,11 @@ iOS 16 userland + open-source XNU on the Galaxy S22 Ultra (b0s, Exynos 2200, Xcl
 - **Never read or write a block whose power domain may be off** — on Exynos it stalls the bus and freezes the SoC with no log. Before a power domain is on, only touch always-on blocks (PMU_ALIVE, the CMUs Samsung's sequence writes first).
 - Before any risky step: print a `step:` marker and `sweet_log_kick()` so a hang shows where it stopped.
 - New hardware code is **off by default** behind a boot-arg (`b0s<area>=1`), and every value carries its source (Samsung file + symbol).
-- Never write EFS/sec_efs/modem/persist/bootloader partitions. Never enable the Qualcomm UFS driver here (`rd=ufsroot0`).
+- Never write EFS/sec_efs/modem/persist/bootloader partitions. `rd=ufsroot0` runs the Exynos-ported UFS driver (0371/0373). No MSM8998/Qualcomm-only paths on b0s.
 - Power sequences: replay Samsung's cal-if tables exactly; on failure, run the matching off-sequence.
 
 ## Build / boot
-- Kernel: push to `b0s` (xnu/patches/**) → CI `xnu-mini` (self-hosted Mac mini, Xcode 27) and `xnu` (GitHub, Xcode 16). Patches are numbered; next number = highest + 1.
+- Kernel: push to `b0s` (xnu/patches/**) → xnu-mini (Mac mini, Xcode 27); xnu (GitHub, Xcode 16) is dispatch-only, as a fallback. Patches are numbered; next number = highest + 1.
 - Boot image: `tools/b0s-boot-xnu.sh KERNEL [boot-args]` → `shim/out/b0s-xnu.img`.
 - Log: the UFS log channel; pull it after the boot and **check which boot it belongs to** (kernel patch number / timestamp) before drawing conclusions.
 
