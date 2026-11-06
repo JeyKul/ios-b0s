@@ -1,0 +1,64 @@
+--- a/bsd/kern/taimen_rootfix.c
++++ b/bsd/kern/taimen_rootfix.c
+@@ -35,6 +35,8 @@
+ #include <libkern/zlib.h>
+ #include <kern/kalloc.h>
+ #include <kern/clock.h>
++#include <sys/disk.h>
++#include <sys/mount.h>
+ 
+ extern vm_map_address_t phystokv(uint64_t pa);
+ extern kern_return_t IOBSDGetPlatformUUID(__darwin_uuid_t uuid, mach_timespec_t timeoutp);
+@@ -603,6 +605,44 @@
+ }
+ 
+ /*
++ * b0s (xnu 0385), boot-arg b0sgrowroot=1: grow the HFS+ root over its whole partition once it is
++ * read-write, with HFS's own hfs_extendfs (HFSIOC_RESIZE_VOLUME, what diskutil resizeVolume uses).
++ * The last 8 MiB stay outside the volume: the sweetlog area is the partition's last 4100 KiB.
++ * A volume that is already that size is left alone, so the boot-arg can stay on.
++ */
++static void
++b0s_grow_root(void)
++{
++	int on = 0;
++	if (!PE_parse_boot_argn("b0sgrowroot", &on, sizeof(on)) || !on || rootvp == NULLVP) {
++		return;
++	}
++	vfs_context_t ctx = vfs_context_kernel();
++	uint64_t count = 0;
++	uint32_t bsize = 0;
++	int e1 = VNOP_IOCTL(rootvp, DKIOCGETBLOCKCOUNT, (caddr_t)&count, 0, ctx);
++	int e2 = VNOP_IOCTL(rootvp, DKIOCGETBLOCKSIZE, (caddr_t)&bsize, 0, ctx);
++	if (e1 || e2 || count == 0 || bsize == 0) {
++		printf("B0S GROWROOT: device size unknown (%d %d)\n", e1, e2);
++		return;
++	}
++	uint64_t dev = count * bsize;
++	uint64_t want = (dev - (8ULL << 20)) & ~((1ULL << 20) - 1);
++	struct vfsstatfs *sf = vfs_statfs(vnode_mount(rootvnode));
++	uint64_t cur = sf->f_blocks * (uint64_t)sf->f_bsize;
++	printf("B0S GROWROOT: device %llu MiB, volume %llu MiB, target %llu MiB\n", dev >> 20, cur >> 20, want >> 20);
++	if (want <= cur + (64ULL << 20)) {
++		return;
++	}
++	uint64_t t0 = mach_absolute_time(), ns;
++	int e = VNOP_IOCTL(rootvnode, _IOW('h', 2, u_int64_t) /* HFSIOC_RESIZE_VOLUME */, (caddr_t)&want, 0, ctx);
++	absolutetime_to_nanoseconds(mach_absolute_time() - t0, &ns);
++	(void)vfs_update_vfsstat(vnode_mount(rootvnode), ctx, VFS_USER_EVENT);
++	printf("B0S GROWROOT: resize -> %d in %llu ms; volume now %llu MiB\n", e, ns / 1000000,
++	    (sf->f_blocks * (uint64_t)sf->f_bsize) >> 20);
++}
++
++/*
+  * Boots 26-27: the root comes up read-only, launchd's boot tasks remount it read-write
+  * (mount -uw /), and an update from here fails: HFS takes local mount args, which
+  * mount_common copies in, and bsdinit_task runs as the init process (copyin from a kernel
+@@ -624,6 +664,7 @@
+ 	}
+ 	printf("TAIMEN ROOTFIX: root read-write after %u ms\n", waited * 50);
+ 	rootfix_apply();
++	b0s_grow_root();
+ }
+ 
+ void
